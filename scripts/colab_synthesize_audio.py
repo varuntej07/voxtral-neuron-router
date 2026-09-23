@@ -32,6 +32,7 @@ def pip_install(*args: str) -> bool:
 if not pip_install("piper-tts>=1.8", "kokoro-onnx>=0.6.1", "soundfile", "librosa", "jiwer"):
     raise SystemExit("pip failed; the error is printed above")
 
+import gc
 import json
 import logging
 import random
@@ -128,6 +129,12 @@ KOKORO_VOICES = [v for v in KOKORO_VOICES if v not in missing]
 print(f"piper speakers: {PIPER_SPEAKERS}, kokoro voices: {len(KOKORO_VOICES)}"
       + (f" (not in this model file: {missing})" if missing else ""))
 
+# Rerunning the cell in the same session: drop the previous Whisper and the crashed run's
+# traceback (which keeps its GPU tensors alive) before loading again.
+globals().pop("asr", None)
+sys.last_type = sys.last_value = sys.last_traceback = None
+gc.collect()
+torch.cuda.empty_cache()
 asr = pipeline("automatic-speech-recognition", model="openai/whisper-large-v3",
                dtype=torch.float16, device="cuda:0")
 
