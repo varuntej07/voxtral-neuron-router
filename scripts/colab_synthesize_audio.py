@@ -162,8 +162,12 @@ def synthesize(text: str, voice: dict) -> np.ndarray:
 
 
 def transcribe(audios: list) -> list:
-    outputs = asr([{"raw": a, "sampling_rate": SAMPLE_RATE} for a in audios], batch_size=16,
-                  generate_kwargs={"language": "english", "task": "transcribe"})
+    # batch 16 with Whisper's default 448-token limit ran out of the T4's 15 GB. The longest
+    # utterance is 42 words (~60 tokens), so 128 tokens is plenty and stops runaway repeats.
+    with torch.inference_mode():
+        outputs = asr([{"raw": a, "sampling_rate": SAMPLE_RATE} for a in audios], batch_size=4,
+                      generate_kwargs={"language": "english", "task": "transcribe", "max_new_tokens": 128})
+    torch.cuda.empty_cache()
     return [o["text"].strip() for o in outputs]
 
 
