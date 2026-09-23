@@ -33,6 +33,7 @@ if not pip_install("piper-tts>=1.8", "kokoro-onnx>=0.6.1", "soundfile", "librosa
     raise SystemExit("pip failed; the error is printed above")
 
 import json
+import logging
 import random
 import re
 import shutil
@@ -49,6 +50,9 @@ from IPython.display import Audio, display
 from kokoro_onnx import Kokoro
 from piper import PiperVoice, SynthesisConfig
 from transformers import pipeline
+
+# phonemizer warns "words count mismatch" on nearly every line; the Whisper check covers real errors.
+logging.getLogger("phonemizer").setLevel(logging.ERROR)
 
 DRIVE_DIR = Path("/content/drive/MyDrive/voxtral-audio")
 AUDIO_DIR = DRIVE_DIR / "audio"
