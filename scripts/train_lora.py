@@ -8,12 +8,17 @@ Same file both ways so the CPU run is the reference the Neuron run is checked ag
 
     # Ahead-of-time compile. Extracts the graphs and fills the cache without
     # spending a real run on compilation. Rerun whenever a shape or the step changes.
-    neuron_parallel_compile torchrun --nproc_per_node=2 scripts/train_lora.py --steps 12
-
-    torchrun --nproc_per_node=2 scripts/train_lora.py --epochs 3
+    neuron_parallel_compile torchrun --nproc_per_node=2 scripts/train_lora.py \
+        --audio-embeds --steps 12 --out /tmp/throwaway
+    torchrun --nproc_per_node=2 scripts/train_lora.py --audio-embeds --epochs 3
     python scripts/train_lora.py --device cpu --steps 2   # reference, needs no Neuron
 
     # Parity: same batches, same order, no dropout, once on CPU fp32 and once on one core.
+    # Both legs are single process on purpose. Under torchrun, --no-shuffle still goes
+    # through DistributedSampler, which gives rank 0 rows 0, 2, 4, 6, 8 while the CPU leg
+    # sees 0, 1, 2, 3, 4: the two legs would train on different examples and their losses
+    # would not be comparable. A single worker leaves the second NeuronCore idle, which is
+    # the right trade for a parity run.
     python scripts/train_lora.py --device cpu --steps 5 --seed 0 --no-shuffle --dropout 0 \
         --results results/train_parity_cpu.json
     python scripts/train_lora.py --steps 5 --seed 0 --no-shuffle --dropout 0 \
@@ -45,13 +50,23 @@ Four things here exist because of Neuron, not because of LoRA.
 
 The audio tower and the projector stay frozen: the encoder is the expensive half and
 the routing decision lives in the language model. Because the encoder is frozen its
-output never changes, so it runs under no_grad here, and caching it outright is the
-next speedup worth taking.
+output never changes, so `--audio-embeds` reads it from a cache built once by
+scripts/precompute_audio_embeds.py and the encoder never enters the graph at all. That
+started as a speedup and became the default for a correctness reason: the Voxtral conv
+frontend is the one component with an open numeric bug on Neuron, disagreeing with the
+CPU reference at cosine 0.0975 with zero transformer layers while the compiler reports
+PASS. An encoder inside the training graph would feed that into every gradient, the loss
+would still fall, and nothing would say so.
+
+Without the flag the mel path runs unchanged, which is what the CPU reference and any
+future on-device encoder comparison need.
 """
 
 import argparse
+import hashlib
 import json
 import os
+import sys
 import time
 from pathlib import Path
 
@@ -62,30 +77,57 @@ from torch.utils.data.distributed import DistributedSampler
 
 ROOT = Path(__file__).resolve().parents[1]
 CACHE_DIR = ROOT / "data" / "cache"
+sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 # Attention and MLP projections of the language model. The audio tower is left alone.
 LORA_TARGETS = ["q_proj", "k_proj", "v_proj", "o_proj", "gate_proj", "up_proj", "down_proj"]
 
 
 class CachedPairs(torch.utils.data.Dataset):
-    def __init__(self, split: str):
+    def __init__(self, split: str, audio_embeds: bool = False):
         data = np.load(CACHE_DIR / f"{split}.npz")
         self.input_ids = torch.from_numpy(data["input_ids"].astype(np.int64))
         self.labels = torch.from_numpy(data["labels"].astype(np.int64))
-        # 7.5 GB for train. Memory mapped, so the torchrun workers share one copy in the
-        # page cache instead of each holding their own on a 32 GB host.
-        self.input_features = np.load(CACHE_DIR / f"{split}.features.npy", mmap_mode="r")
         self.meta = json.loads((CACHE_DIR / f"{split}.meta.json").read_text(encoding="utf-8"))
+        self.audio_embeds = audio_embeds
+        self.emeta = None
+
+        if not audio_embeds:
+            # 7.5 GB for train. Memory mapped, so the torchrun workers share one copy in the
+            # page cache instead of each holding their own on a 32 GB host.
+            self.array = np.load(CACHE_DIR / f"{split}.features.npy", mmap_mode="r")
+            return
+
+        # 10.5 GB for train: four times fewer positions than the mel but twenty-four times
+        # wider, so the embeddings are the larger array, not the smaller one.
+        side = CACHE_DIR / f"{split}.audio_embeds.meta.json"
+        if not side.exists():
+            raise SystemExit(f"{side.name} is missing; run scripts/precompute_audio_embeds.py")
+        self.emeta = json.loads(side.read_text(encoding="utf-8"))
+        if not self.emeta.get("complete"):
+            raise SystemExit(f"{split}.audio_embeds.npy holds {self.emeta.get('rows_done')} of "
+                             f"{self.emeta.get('rows')} rows; finish the precompute first")
+        # Row i of the embeds is only meaningful beside row i of these tokens. A token cache
+        # rebuilt at a different --limit would pair every row with somebody else's audio and
+        # train perfectly happily on it, so the pairing is checked rather than assumed.
+        want = hashlib.sha256(np.ascontiguousarray(data["input_ids"]).tobytes()).hexdigest()
+        if self.emeta.get("ids_sha256") != want:
+            raise SystemExit("the audio embeds were computed from a different token cache; "
+                             "rerun scripts/precompute_audio_embeds.py against this one")
+        self.store = self.emeta["numpy_dtype"]
+        self.array = np.load(CACHE_DIR / f"{split}.audio_embeds.npy", mmap_mode="r")
 
     def __len__(self) -> int:
         return len(self.input_ids)
 
     def __getitem__(self, i: int) -> dict:
-        return {
-            "input_ids": self.input_ids[i],
-            "labels": self.labels[i],
-            "input_features": torch.from_numpy(np.array(self.input_features[i])),
-        }
+        row = torch.from_numpy(np.array(self.array[i]))
+        if self.audio_embeds:
+            # numpy has no bfloat16, so the file holds the bit pattern as uint16.
+            if self.store == "uint16":
+                row = row.view(torch.bfloat16)
+            return {"input_ids": self.input_ids[i], "labels": self.labels[i], "audio_embeds": row}
+        return {"input_ids": self.input_ids[i], "labels": self.labels[i], "input_features": row}
 
 
 def splice_audio(model, input_ids: torch.Tensor, input_features: torch.Tensor,
@@ -94,15 +136,38 @@ def splice_audio(model, input_ids: torch.Tensor, input_features: torch.Tensor,
     base = model.get_input_embeddings()(input_ids)
     with torch.no_grad():  # the encoder is frozen, so nothing here needs an activation kept
         audio = model.get_audio_embeds(input_features)
+    # get_audio_embeds returns a flat (B*width, hidden): the four-frames-per-token packing is
+    # a reshape that collapses the batch dimension along with it, so put the batch back.
     audio = audio.reshape(input_ids.shape[0], width, -1).to(base.dtype)
     return torch.cat([base[:, :start], audio, base[:, start + width :]], dim=1)
 
 
+def splice_audio_cached(model, input_ids: torch.Tensor, audio: torch.Tensor,
+                        start: int, width: int) -> torch.Tensor:
+    """Same sequence as splice_audio, with the frozen half already run somewhere else.
+
+    No reshape here, and that is the whole difference: the dataset hands over (B, width,
+    hidden) rather than the flat (B*width, hidden) the model returns.
+
+    The cache is exact rather than an approximation. Voxtral hardcodes the encoder's dropout,
+    layerdrop and activation_dropout to 0.0 and the forward applies F.dropout(p=0.0), so a
+    cached embedding is bit-identical to the one this loop would have computed at the same
+    dtype, model.train() included.
+    """
+    base = model.get_input_embeddings()(input_ids)
+    if audio.shape[1] != width or audio.shape[2] != base.shape[2]:
+        raise ValueError(f"cached audio is {tuple(audio.shape)}, want (B, {width}, {base.shape[2]})")
+    return torch.cat([base[:, :start], audio.to(base.dtype), base[:, start + width :]], dim=1)
+
+
 def build_model(model_dir: Path, dtype: torch.dtype, rank: int, alpha: int, dropout: float):
     from peft import LoraConfig, get_peft_model
-    from transformers import VoxtralForConditionalGeneration
 
-    model = VoxtralForConditionalGeneration.from_pretrained(model_dir, torch_dtype=dtype)
+    # One loader for training, the reference and the eval. It carries the dtype/torch_dtype
+    # keyword rename, which lives in **kwargs and so cannot be asked about politely.
+    from reference_forward import load_model
+
+    model = load_model(model_dir, dtype, "eager").train()
     model.config.use_cache = False  # a KV cache in training is a second set of shapes
     model.audio_tower.requires_grad_(False)
     model.multi_modal_projector.requires_grad_(False)
@@ -194,6 +259,13 @@ def main() -> None:
     parser.add_argument("--model", default="~/models/voxtral-mini-3b")
     parser.add_argument("--device", choices=["xla", "cpu"], default="xla")
     parser.add_argument("--split", default="train")
+    parser.add_argument("--audio-embeds", action="store_true",
+                        help="read data/cache/<split>.audio_embeds.npy instead of the mels, so the "
+                             "frozen encoder never enters the graph")
+    parser.add_argument("--rows", type=int, default=0,
+                        help="train on the first N rows, for sizing a run against a fixed clock")
+    parser.add_argument("--max-minutes", type=float, default=0,
+                        help="stop cleanly at this wall clock, still saving the adapter and results")
     parser.add_argument("--batch-size", type=int, default=1, help="per NeuronCore")
     parser.add_argument("--epochs", type=int, default=1)
     parser.add_argument("--steps", type=int, default=0, help="stop early, for compile and smoke runs")
@@ -235,14 +307,31 @@ def main() -> None:
         device = torch.device("cpu")
         dtype = torch.float32
 
-    data = CachedPairs(args.split)
-    start, width = data.meta["audio_span_start"], data.meta["audio_span_width"]
-    prompt_len, seq = data.meta["prompt_len"], data.meta["seq"]
+    cache = CachedPairs(args.split, audio_embeds=args.audio_embeds)
+    start, width = cache.meta["audio_span_start"], cache.meta["audio_span_width"]
+    prompt_len, seq = cache.meta["prompt_len"], cache.meta["seq"]
     keep = seq - prompt_len + 1  # logits[:, k] predicts the label at prompt_len + k
+    # keep also equals seq - (start + width), but only because prompt_len is one past the end
+    # of the audio span in this prompt. That is a property of this catalog, not a guarantee, and
+    # a cache that moved the span would otherwise produce a plausible-looking wrong loss.
+    if start + width >= prompt_len:
+        raise SystemExit(f"audio span [{start}, {start + width}) runs into the target, which "
+                         f"starts at {prompt_len}")
+
+    data = cache
+    if args.rows:
+        if args.rows < world_size * args.batch_size:
+            # drop_last is on for both the sampler and the loader, so a subset this small
+            # yields zero steps and the run reports success having trained nothing.
+            raise SystemExit(f"--rows {args.rows} is below world_size * batch_size "
+                             f"({world_size * args.batch_size}), which would run zero steps")
+        data = torch.utils.data.Subset(cache, range(min(args.rows, len(cache))))
 
     if is_master:
-        print(f"{len(data)} rows, seq {seq}, audio span [{start}, {start + width}), "
-              f"loss over {seq - prompt_len} of {seq} positions, {world_size} worker(s)", flush=True)
+        source = "cached embeds" if args.audio_embeds else "mels, encoder in the graph"
+        print(f"{len(data)} of {len(cache)} rows, seq {seq}, audio span [{start}, {start + width}), "
+              f"loss over {seq - prompt_len} of {seq} positions, {world_size} worker(s), "
+              f"audio from {source}", flush=True)
 
     sampler = None
     if world_size > 1:
@@ -272,6 +361,16 @@ def main() -> None:
 
     optimizer = torch.optim.AdamW([p for p in model.parameters() if p.requires_grad], lr=args.lr)
 
+    # Hand the mask in rather than letting transformers build one. Left to itself it builds
+    # masks with torch.vmap, which is a pile of ops for a constant and a plausible source of
+    # the aten:: fallbacks xla_metrics() exists to catch. It also means the training forward
+    # and reference_forward.py would be masked by different code, so a numeric comparison
+    # between them would be measuring that difference too. Same construction as the reference.
+    # masking_utils returns any 4D mask untouched. The sequence is always exactly full, so
+    # this is a plain lower triangle, and it is a constant rather than a per-step input.
+    causal = torch.full((seq, seq), torch.finfo(dtype).min, dtype=dtype)
+    causal = torch.triu(causal, diagonal=1)[None, None].to(device)
+
     def sync() -> None:
         if on_xla:
             xm.wait_device_ops()  # only at measurement edges; per step it would stall the queue
@@ -279,7 +378,7 @@ def main() -> None:
     losses: list[tuple[int, float]] = []
     first_step_s = steady_start = None
     step, t0 = 0, time.time()
-    stop = False
+    stop = stopped_on_clock = False
     for epoch in range(args.epochs):
         if sampler is not None:
             sampler.set_epoch(epoch)
@@ -290,10 +389,15 @@ def main() -> None:
         for batch in epoch_loader:
             input_ids = batch["input_ids"].to(device)
             labels = batch["labels"].to(device)
-            features = batch["input_features"].to(device, dtype)
 
-            inputs_embeds = splice_audio(model, input_ids, features, start, width)
-            logits = model(inputs_embeds=inputs_embeds, logits_to_keep=keep).logits
+            if args.audio_embeds:
+                audio = batch["audio_embeds"].to(device, dtype)
+                inputs_embeds = splice_audio_cached(model, input_ids, audio, start, width)
+            else:
+                features = batch["input_features"].to(device, dtype)
+                inputs_embeds = splice_audio(model, input_ids, features, start, width)
+            logits = model(inputs_embeds=inputs_embeds, attention_mask=causal,
+                           logits_to_keep=keep).logits
             loss = torch.nn.functional.cross_entropy(
                 logits[:, :-1].reshape(-1, logits.shape[-1]).float(),
                 labels[:, prompt_len:].reshape(-1),
@@ -335,6 +439,16 @@ def main() -> None:
             if args.steps and step >= args.steps:
                 stop = True
                 break
+            # A fixed-cost session needs the run to end on the clock rather than on an epoch
+            # count guessed before the step time was known. Both workers evaluate the same
+            # condition on their own host clock, which can differ by a step; the rendezvous
+            # after the loop is what makes that safe.
+            if args.max_minutes and (time.time() - t0) / 60 >= args.max_minutes:
+                stop = True
+                stopped_on_clock = True
+                if is_master:
+                    print(f"--max-minutes {args.max_minutes} reached at step {step}", flush=True)
+                break
         if stop:
             break
 
@@ -362,13 +476,18 @@ def main() -> None:
         record = {
             "device": args.device,
             "notes": args.notes,
+            # A step time is meaningless without knowing whether the encoder was in the graph.
+            "audio_embeds": args.audio_embeds,
+            "audio_embeds_meta": cache.emeta,
+            "rows_trained": len(data),
+            "stopped_on_clock": stopped_on_clock,
             "instance_type": os.environ.get("NEURON_INSTANCE_TYPE"),
             "peak_host_memory_gb": peak_host_memory_gb(),
             "world_size": world_size,
             "args": vars(args),
             "versions": package_versions(),
             "neuron_cc_flags": os.environ.get("NEURON_CC_FLAGS"),
-            "rows": len(data),
+            "rows": len(cache),
             "seq": seq,
             "steps": step,
             "wall_s": end - t0,

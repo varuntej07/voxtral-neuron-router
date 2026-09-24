@@ -1,0 +1,47 @@
+{
+  "tokenizer_version": "v7",
+  "audio_token_id": 24,
+  "by_clip_seconds": {
+    "1": {
+      "total": 618,
+      "audio_tokens": 375,
+      "audio_start": 225
+    },
+    "2": {
+      "total": 618,
+      "audio_tokens": 375,
+      "audio_start": 225
+    },
+    "3": {
+      "total": 618,
+      "audio_tokens": 375,
+      "audio_start": 225
+    },
+    "7": {
+      "total": 618,
+      "audio_tokens": 375,
+      "audio_start": 225
+    },
+    "15": {
+      "total": 618,
+      "audio_tokens": 375,
+      "audio_start": 225
+    },
+    "30": {
+      "total": 618,
+      "audio_tokens": 375,
+      "audio_start": 225
+    }
+  },
+  "constant_regardless_of_clip_length": true,
+  "audio_tokens": 375,
+  "audio_span_start": 225,
+  "target_tokens": {
+    "max": 113,
+    "p95": 49,
+    "median": 18
+  },
+  "rows": 4903,
+  "note": "system role plus audio is rejected by tokenizer v7, so the tool catalog rides in the user turn as a text chunk ahead of the audio",
+  "suggested_seq_bucket": 768
+}

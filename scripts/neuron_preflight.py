@@ -92,17 +92,37 @@ def shape_check() -> dict:
     if not meta_path.exists():
         return {"ok": False, "reason": "run scripts/prepare_sft_cache.py first"}
     meta = json.loads(meta_path.read_text(encoding="utf-8"))
-    if not (ROOT / "data" / "cache" / "train.features.npy").exists():
-        return {"ok": False, "reason": "train.features.npy missing; rebuild with the current prepare_sft_cache.py"}
+    cache = ROOT / "data" / "cache"
+    # Either audio source is legitimate. --audio-embeds keeps the encoder out of the graph
+    # and does not need the mels at all, so demanding them would fail a valid setup.
+    has_mel = (cache / "train.features.npy").exists()
+    embeds_side = cache / "train.audio_embeds.meta.json"
+    has_embeds = (cache / "train.audio_embeds.npy").exists() and embeds_side.exists()
+    if not (has_mel or has_embeds):
+        return {"ok": False, "reason": "neither train.features.npy nor train.audio_embeds.npy; "
+                                       "run prepare_sft_cache.py, then precompute_audio_embeds.py"}
+
     keep = meta["seq"] - meta["prompt_len"] + 1
-    return {
+    report = {
         "ok": meta["longest_row"] <= meta["seq"] and keep > 1,
         "seq": meta["seq"],
         "prompt_len": meta["prompt_len"],
         "logits_kept": keep,
         "audio_span": [meta["audio_span_start"], meta["audio_span_start"] + meta["audio_span_width"]],
         "built_from_silence": meta.get("silence", False),
+        "audio_source": "both" if has_mel and has_embeds else ("embeds" if has_embeds else "mel"),
     }
+    if has_embeds:
+        side = json.loads(embeds_side.read_text(encoding="utf-8"))
+        report["embeds"] = {k: side.get(k) for k in
+                            ("rows", "rows_done", "complete", "store_dtype", "device", "shape")}
+        # A partial cache is the failure that looks like a working one: training would refuse
+        # to start, but only after the model load, which is minutes in.
+        if not side.get("complete"):
+            report["ok"] = False
+            report["reason"] = (f"audio embeds are {side.get('rows_done')} of {side.get('rows')} "
+                                f"rows; finish precompute_audio_embeds.py")
+    return report
 
 
 def main() -> None:

@@ -107,8 +107,11 @@ def main() -> None:
     parser.add_argument("--audio-dir", default="data/audio",
                         help="data/audio_real for the human recorded set")
     parser.add_argument("--limit", type=int, default=0)
-    parser.add_argument("--max-new-tokens", type=int, default=128,
-                        help="target answers reach 113 tokens; see results/prompt_shape.json")
+    parser.add_argument("--max-new-tokens", type=int, default=64,
+                        help="targets are median 18 and p95 49, see results/prompt_shape.json. The "
+                             "cap matters most for the base model, which was never trained to emit "
+                             "one JSON object and stop, so it runs to the cap and pays for every "
+                             "token of it. Raise to 128 to cover the 113 token tail.")
     parser.add_argument("--results", default="results/eval_routing.json")
     parser.add_argument("--fresh", action="store_true", help="ignore existing predictions and redo")
     args = parser.parse_args()
@@ -138,11 +141,26 @@ def main() -> None:
     catalog = catalog_text()
 
     model = load_model(model_dir, dtype, "eager")
+    adapter_check = None
     if args.adapter:
         from peft import PeftModel
 
         model = PeftModel.from_pretrained(model, str(Path(args.adapter).expanduser()))
         model = model.eval()
+        # PEFT initialises lora_B to zeros, so an adapter that failed to attach, or attached
+        # and was never trained, is exactly a no-op: the run would score the base model while
+        # claiming to score the tuned one, and present as "fine-tuning did not help". That is
+        # the one conclusion that must not be reached by accident, so prove otherwise here
+        # rather than inferring it from the accuracy afterwards.
+        b_tensors = [p for n, p in model.named_parameters() if "lora_B" in n]
+        nonzero = sum(1 for p in b_tensors if p.abs().sum().item() > 0)
+        adapter_check = {"lora_B_tensors": len(b_tensors), "nonzero": nonzero}
+        if not b_tensors:
+            raise SystemExit(f"{args.adapter} attached no LoRA tensors; nothing would be measured")
+        if not nonzero:
+            raise SystemExit(f"every lora_B in {args.adapter} is zero, so the adapter is a no-op "
+                             f"and this run would silently re-score the base model")
+        print(f"adapter loaded: {nonzero} of {len(b_tensors)} lora_B tensors are nonzero", flush=True)
     if args.device == "xla":
         import torch_xla.core.xla_model as xm
 
@@ -194,6 +212,8 @@ def main() -> None:
         "model": str(model_dir),
         "adapter": args.adapter or None,
         "is_base": not args.adapter,
+        "adapter_check": adapter_check,
+        "max_new_tokens": args.max_new_tokens,
         "device": args.device,
         "dtype": args.dtype,
         "split": args.split,

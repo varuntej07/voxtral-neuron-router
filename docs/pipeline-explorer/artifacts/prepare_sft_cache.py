@@ -2,17 +2,11 @@
 
 Neuron compiles one graph per input shape, so every example has to arrive at the same
 shape. This does all the variable-length work on CPU, ahead of time, and writes three
-arrays per split to data/cache/:
+arrays per split to data/cache/<split>.npz:
 
-    <split>.features.npy  input_features  (n, 128, 3000)  one 30 s mel window, padded with silence
-    <split>.npz           input_ids       (n, seq)        right-padded with the pad token
-                          labels          (n, seq)        -100 everywhere but the assistant JSON
-
-The features are a plain .npy, not part of the npz, because they are the big one: 4903
-train rows are 7.5 GB in fp32. An npz member is always decompressed into RAM, and each
-torchrun worker would hold its own copy on a 32 GB trn1.2xlarge next to its own model
-load. A .npy can be memory mapped, so both workers share one copy in the page cache, and
-this script writes it row by row instead of stacking a 7.5 GB list.
+    input_features  (n, 128, 3000)    one 30 s mel window, padded with silence
+    input_ids       (n, seq)          right-padded with the pad token
+    labels          (n, seq)          -100 everywhere but the assistant JSON
 
 Two measured facts drive the layout (see results/prompt_shape.json, written by
 scripts/probe_prompt_shape.py):
@@ -100,30 +94,6 @@ def mel_window(extractor, audio: np.ndarray) -> np.ndarray:
     return features[0]
 
 
-def check_clips(pairs: list[dict]) -> None:
-    """Every clip present, 16 kHz, and inside the window, before any slow work starts."""
-    import soundfile as sf
-
-    missing, wrong_rate, too_long = [], [], []
-    for pair in pairs:
-        path = ROOT / pair["audio"]
-        if not path.exists():
-            missing.append(pair["id"])
-            continue
-        info = sf.info(path)
-        if info.samplerate != SAMPLE_RATE:
-            wrong_rate.append(f"{pair['id']} ({info.samplerate} Hz)")
-        elif info.frames > SAMPLE_RATE * WINDOW_SECONDS:
-            too_long.append(f"{pair['id']} ({info.frames / SAMPLE_RATE:.1f}s)")
-    if missing or wrong_rate or too_long:
-        raise SystemExit(
-            f"{len(missing)} of {len(pairs)} clips missing, {len(wrong_rate)} not {SAMPLE_RATE} Hz, "
-            f"{len(too_long)} longer than {WINDOW_SECONDS}s. First few: "
-            f"missing {missing[:5]}, rate {wrong_rate[:5]}, long {too_long[:5]}"
-        )
-    print(f"all {len(pairs)} clips present, {SAMPLE_RATE} Hz, within {WINDOW_SECONDS}s", flush=True)
-
-
 def read_clip(path: Path) -> np.ndarray:
     import soundfile as sf
 
@@ -152,38 +122,22 @@ def main() -> None:
     pairs = [json.loads(l) for l in (SFT_DIR / f"{args.split}.jsonl").read_text(encoding="utf-8").splitlines() if l]
     if args.limit:
         pairs = pairs[: args.limit]
-    if not args.silence:
-        check_clips(pairs)
 
     # Tokenization needs a file, so silence mode writes one and reuses it for every row.
     tmp = Path(tempfile.mkdtemp())
     silence_wav = tmp / "silence.wav"
     sf.write(silence_wav, np.zeros(SAMPLE_RATE, dtype=np.float32), SAMPLE_RATE)
 
-    CACHE_DIR.mkdir(parents=True, exist_ok=True)
-    # Written in place, one row at a time, so peak RAM is one mel window, not the split.
-    features = None
-    ids_rows, prompt_lens = [], []
-    for i, pair in enumerate(pairs):
+    ids_rows, mel_rows, prompt_lens = [], [], []
+    for pair in pairs:
         catalog = pair["messages"][0]["content"]
         target = pair["messages"][2]["content"]
         wav = silence_wav if args.silence else ROOT / pair["audio"]
         ids, prompt_len = encode(tokenizers, catalog, target, wav)
         audio = np.zeros(SAMPLE_RATE, dtype=np.float32) if args.silence else read_clip(wav)
-        mel = mel_window(extractor, audio).astype(np.float32)
-        if features is None:
-            features = np.lib.format.open_memmap(
-                CACHE_DIR / f"{args.split}.features.npy", mode="w+",
-                dtype=np.float32, shape=(len(pairs), *mel.shape),
-            )
-        features[i] = mel
         ids_rows.append(ids)
+        mel_rows.append(mel_window(extractor, audio))
         prompt_lens.append(prompt_len)
-        if (i + 1) % 500 == 0:
-            print(f"{i + 1} of {len(pairs)} rows", flush=True)
-    mel_shape = list(features.shape[1:])
-    features.flush()
-    del features
 
     longest = max(len(r) for r in ids_rows)
     if longest > args.seq:
@@ -208,14 +162,16 @@ def main() -> None:
     if len(starts) != 1 or len(widths) != 1:
         raise SystemExit(f"audio span moves between rows: starts {sorted(starts)[:5]}, widths {sorted(widths)[:5]}")
 
-    np.savez(CACHE_DIR / f"{args.split}.npz", input_ids=input_ids, labels=labels)
+    CACHE_DIR.mkdir(parents=True, exist_ok=True)
+    np.savez(
+        CACHE_DIR / f"{args.split}.npz",
+        input_ids=input_ids,
+        labels=labels,
+        input_features=np.stack(mel_rows).astype(np.float32),
+    )
     meta = {
         "split": args.split,
         "rows": len(ids_rows),
-        # Which clip each row index is. Without this there is no way to line a cache row up
-        # with data/text/rows.jsonl, which is what an eval needs to reuse a cached embedding
-        # by id, and what makes a single bad row findable. About 60 kB for the train split.
-        "ids": [p["id"] for p in pairs],
         "seq": args.seq,
         "longest_row": longest,
         "audio_span_start": starts.pop(),
@@ -223,7 +179,7 @@ def main() -> None:
         # Loss only touches the tail, so the forward can drop the rest of the logits.
         "prompt_len": prompt_lens[0],
         "target_tokens_max": max(len(r) - p for r, p in zip(ids_rows, prompt_lens)),
-        "mel_shape": mel_shape,
+        "mel_shape": list(mel_rows[0].shape),
         "pad_token_id": int(pad_id),
         "silence": args.silence,
     }

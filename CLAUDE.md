@@ -20,6 +20,7 @@ Success looks like:
 - `scripts/stress_test.py`: prompt-size vs accuracy check.
 - `scripts/build_sft.py`: rows to LoRA chat pairs in `data/sft/`; after TTS each user turn is replaced by the audio clip with the same id.
 - `data/text/rows.jsonl` is the text dataset; `results/` holds measured numbers.
+- `lessons.txt`: JSON, read it before touching trn1 or inf2. Only things that cost real time or money on the hardware and that a competent engineer would not have guessed, such as which AMI can actually compile and what the working venv is. Not a log, and not generic Linux or pip trivia.
 
 ## Rules
 
@@ -30,3 +31,7 @@ Success looks like:
 - Report numbers only from files in `results/`; never quote a latency or accuracy that was not measured.
 - Neuron compiles one graph per input shape: fix shapes and buckets deliberately and write down why.
 - No em dashes anywhere. Commit messages read human-written, with no AI attribution or co-authoring. Never push without being asked.
+
+## IMPORTANT
+
+- whenever you find an important thing that should be remembered or should be noted down somewhere that would be helpful in writing a blog or explaining in an interview or in discussions - write it down to lessons.txt
