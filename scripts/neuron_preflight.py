@@ -16,7 +16,10 @@ import time
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
-WANT_ENV = ["NEURON_CC_FLAGS", "NEURON_RT_NUM_CORES", "NEURON_COMPILE_CACHE_URL"]
+WANT_ENV = ["NEURON_CC_FLAGS", "NEURON_COMPILE_CACHE_URL"]
+# torch-neuronx 2.9.0.2.15 declares no compiler pin, and 2.27 fails on every graph it emits.
+# See pin-neuronx-cc-to-match-torch-neuronx in lessons.txt.
+WANT_NEURONX_CC = "2.26.6360.0"
 
 
 def run(cmd: list[str]) -> str:
@@ -37,11 +40,30 @@ def versions() -> dict:
             found[name] = getattr(importlib.import_module(name), "__version__", "present")
         except ImportError:
             found[name] = None
+    from importlib.metadata import PackageNotFoundError, version
+
+    try:
+        found["neuronx-cc"] = version("neuronx-cc")
+    except PackageNotFoundError:
+        found["neuronx-cc"] = None
     return found
 
 
+def voxtral_api_check() -> dict:
+    """train_lora.py calls get_audio_embeds; the name has moved between transformers releases."""
+    try:
+        from transformers import VoxtralForConditionalGeneration
+    except ImportError as exc:
+        return {"ok": False, "reason": str(exc)}
+    return {"ok": hasattr(VoxtralForConditionalGeneration, "get_audio_embeds")}
+
+
 def compile_probe() -> dict:
-    """Compile and run one tiny graph, twice.
+    """Compile and run a 64x64 Linear plus gelu, twice.
+
+    This is the toolchain canary from lessons.txt: under a mismatched compiler this exact
+    graph fails with the same error as the full model, in about 30 seconds instead of 20
+    minutes.
 
     The first call pays compilation, the second should hit the cache. If the second is
     as slow as the first, NEURON_COMPILE_CACHE_URL is not being honoured and every
@@ -54,9 +76,10 @@ def compile_probe() -> dict:
     timings, value = [], float("nan")
     for _ in range(2):
         started = time.time()
-        a = torch.randn(256, 256, device=device, dtype=torch.bfloat16)
-        b = torch.randn(256, 256, device=device, dtype=torch.bfloat16)
-        c = (a @ b).sum()
+        torch.manual_seed(0)
+        layer = torch.nn.Linear(64, 64).to(device=device, dtype=torch.bfloat16)
+        x = torch.randn(8, 64, device=device, dtype=torch.bfloat16)
+        c = torch.nn.functional.gelu(layer(x)).sum()
         xm.mark_step()
         value = c.item()
         timings.append(round(time.time() - started, 2))
@@ -69,6 +92,8 @@ def shape_check() -> dict:
     if not meta_path.exists():
         return {"ok": False, "reason": "run scripts/prepare_sft_cache.py first"}
     meta = json.loads(meta_path.read_text(encoding="utf-8"))
+    if not (ROOT / "data" / "cache" / "train.features.npy").exists():
+        return {"ok": False, "reason": "train.features.npy missing; rebuild with the current prepare_sft_cache.py"}
     keep = meta["seq"] - meta["prompt_len"] + 1
     return {
         "ok": meta["longest_row"] <= meta["seq"] and keep > 1,
@@ -87,6 +112,7 @@ def main() -> None:
         "neuron_devices": run(["neuron-ls"]),
         "versions": versions(),
         "shapes": shape_check(),
+        "voxtral_api": voxtral_api_check(),
     }
 
     if report["versions"].get("torch_xla"):
@@ -103,6 +129,10 @@ def main() -> None:
     for name in ("torch_xla", "torch_neuronx", "peft", "transformers"):
         if not report["versions"].get(name):
             blocking.append(f"{name} is not installed")
+    if report["versions"].get("neuronx-cc") != WANT_NEURONX_CC:
+        blocking.append(f"neuronx-cc is {report['versions'].get('neuronx-cc')}, want {WANT_NEURONX_CC}")
+    if not report["voxtral_api"].get("ok"):
+        blocking.append("VoxtralForConditionalGeneration has no get_audio_embeds in this transformers")
     if not report["shapes"].get("ok"):
         blocking.append(f"cache not usable: {report['shapes'].get('reason', 'shapes disagree')}")
     if report["compile_probe"].get("failed"):
