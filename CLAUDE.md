@@ -4,7 +4,7 @@ Source of the tool set: Aura, a voice companion app (https://auravoiceapp.com) w
 
 ## Goal
 
-A portfolio demo for AWS Annapurna Labs. It fine-tunes Voxtral Mini 3B on Trainium (trn1) and serves it on Inferentia2 (inf2) as the speech-and-routing step of a LiveKit voice turn. Routing is the easy part; the Neuron work is what is being judged: compile, training, porting, numeric parity with a GPU/CPU reference, and latency.
+fine-tune Voxtral Mini 3B on Trainium (trn1) and serve it on Inferentia2 (inf2) as the speech-and-routing step of a LiveKit voice turn using in a different project. Routing is the easy part; the Neuron work is what is being judged: compile, training, porting, numeric parity with a GPU/CPU reference, and latency. so that is where the priority should be - knowing neuron, trainium and inferentia internals
 
 Success looks like:
 - the fine-tuned model beats base Voxtral on a real-speech test set
@@ -29,4 +29,4 @@ Success looks like:
 - API keys live only in the gitignored `.env` (loaded by `tooling.py`) or the shell environment. Never commit them, print them, or put them on a command line.
 - Report numbers only from files in `results/`; never quote a latency or accuracy that was not measured.
 - Neuron compiles one graph per input shape: fix shapes and buckets deliberately and write down why.
-- No em dashes anywhere. Commit messages read human-written, with no AI attribution. Never push without being asked.
+- No em dashes anywhere. Commit messages read human-written, with no AI attribution or co-authoring. Never push without being asked.
