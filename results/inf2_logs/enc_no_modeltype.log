@@ -1,0 +1,8 @@
+Loading checkpoint shards:   0%|          | 0/2 [00:00<?, ?it/s]Loading checkpoint shards:  50%|█████     | 1/2 [00:00<00:00,  2.05it/s]Loading checkpoint shards: 100%|██████████| 2/2 [00:00<00:00,  3.08it/s]Loading checkpoint shards: 100%|██████████| 2/2 [00:00<00:00,  2.86it/s]
+.
+2026-09-24T04:12:20Z loc(unknown) [INTERNAL_ERROR] [NCC_ISMP902] Simplifier error: is_subset(): incompatible function arguments. The following argument types are supported: - Please open a support ticket at https://github.com/aws-neuron/aws-neuron-sdk/issues/new. You may also be able to obtain more information using the 'XLA_IR_DEBUG' and 'XLA_HLO_DEBUG' environment variables.
+encoder: trace failed, see results/neuron_parity.json
+
+real	0m44.580s
+user	0m20.920s
+sys	0m6.289s

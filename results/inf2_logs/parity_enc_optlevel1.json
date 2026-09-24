@@ -1,0 +1,20 @@
+{
+  "encoder": {
+    "stage": "encoder",
+    "dtype": "bfloat16",
+    "attn_implementation": "eager",
+    "compiler_args": "--target=inf2 --model-type=transformer --auto-cast=none --optlevel=1",
+    "reference_dtype": "bfloat16",
+    "reference_prefill_tokens": 601,
+    "wav_is_synthetic": true,
+    "instance": "inf2.xlarge",
+    "input_shape": [
+      1,
+      128,
+      3000
+    ],
+    "compiled": false,
+    "compile_seconds": 24.5,
+    "error": "Traceback (most recent call last):\n  File \"/home/ubuntu/voxtral-neuron-router/scripts/neuron_forward_smoke.py\", line 226, in main\n    traced = torch_neuronx.trace(\n             ^^^^^^^^^^^^^^^^^^^^\n  File \"/home/ubuntu/venv-trace/lib/python3.12/site-packages/torch_neuronx/xla_impl/trace.py\", line 603, in trace\n    neff_filename, metaneff, flattener, packer, weights = _trace(\n                                                          ^^^^^^^\n  File \"/home/ubuntu/venv-trace/lib/python3.12/site-packages/torch_neuronx/xla_impl/trace.py\", line 683, in _trace\n    neff_artifacts = generate_neff(\n                     ^^^^^^^^^^^^^^\n  File \"/home/ubuntu/venv-trace/lib/python3.12/site-packages/torch_neuronx/xla_impl/trace.py\", line 518, in generate_neff\n    neff_filename = hlo_compile(\n                    ^^^^^^^^^^^^\n  File \"/home/ubuntu/venv-trace/lib/python3.12/site-packages/torch_neuronx/xla_impl/trace.py\", line 341, in hlo_compile\n    raise RuntimeError(f\"neuronx-cc failed with {status}\")\nRuntimeError: neuronx-cc failed with 70\n"
+  }
+}

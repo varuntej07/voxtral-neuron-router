@@ -11,8 +11,19 @@ Two questions, in the order that makes each answer cheap:
      cut is traced and compared against CPU on the same cut. k=0 isolates the conv frontend.
 
     source scripts/neuron_env_inf2.sh
-    python -u scripts/encoder_bisect.py --cpu-only          # question 1
-    python -u scripts/encoder_bisect.py --layers 0,1,8      # question 2
+    python -u scripts/encoder_bisect.py --cpu-only                       # question 1
+    python -u scripts/encoder_bisect.py --layers 0,1,full                # question 2
+    python -u scripts/encoder_bisect.py --layers full --with-projector   # the exact smoke graph
+
+The depth list has to reach full depth. A sweep of 0,1,8 that comes back clean says only
+that depths 0, 1 and 8 agree; it never traces the graph that produced the mismatch, so it
+cannot explain it. Pass 'full' and the real depth is resolved at runtime. The script warns
+when the list stops short.
+
+--with-projector matters for the same reason. Without it this script traces the tower alone
+and returns last_hidden_state, while neuron_forward_smoke.py traces the tower plus the
+reshape and projector. Those are different graphs, so a clean sweep here next to a dirty
+smoke run leaves a hole rather than an answer.
 
 Writes results/encoder_bisect.json.
 """
@@ -37,7 +48,15 @@ def main() -> None:
     parser.add_argument("--model", default="~/models/voxtral-mini-3b")
     parser.add_argument("--dtype", default="bfloat16", choices=["bfloat16", "float32"])
     parser.add_argument("--attn", default="eager", choices=["eager", "sdpa"])
-    parser.add_argument("--layers", default="0,1,8", help="encoder depths to trace and compare")
+    parser.add_argument("--layers", default="0,1,full",
+                        help="encoder depths to trace and compare. 'full' resolves to the "
+                             "tower's real depth at runtime. The list must reach full depth "
+                             "or the sweep cannot reproduce the mismatch it exists to explain")
+    parser.add_argument("--with-projector", action="store_true",
+                        help="include the reshape and projector, so the deepest cut is the "
+                             "same graph neuron_forward_smoke.py traces. Without this the "
+                             "sweep can come back clean while the smoke run stays dirty, "
+                             "because they are not tracing the same thing")
     parser.add_argument("--cpu-only", action="store_true", help="only check CPU against the reference npz")
     parser.add_argument("--compiler-args", default="--target=inf2 --model-type=transformer --auto-cast=none")
     args = parser.parse_args()
@@ -81,25 +100,54 @@ def main() -> None:
     import torch_neuronx
 
     class Tower(torch.nn.Module):
-        def __init__(self, tower):
+        def __init__(self, tower, projector=None):
             super().__init__()
             self.tower = tower
+            self.projector = projector
 
         def forward(self, input_features):
-            return self.tower(input_features).last_hidden_state
+            hidden = self.tower(input_features).last_hidden_state
+            if self.projector is None:
+                return hidden
+            # Truncating depth does not change the [1, 1500, 1280] output shape, so the
+            # reshape still packs cleanly at any depth and a cut graph stays a genuine
+            # prefix of the production one.
+            return self.projector(hidden.reshape(-1, intermediate))
 
     all_layers = tower.layers
+    full_depth = len(all_layers)
+    record["full_depth"] = full_depth
+    record["with_projector"] = args.with_projector
+
+    depths = []
+    for token in args.layers.split(","):
+        token = token.strip()
+        depths.append(full_depth if token in ("full", "all") else int(token))
+    if max(depths) < full_depth:
+        # A sweep that stops short can only ever say "the depths I tried were clean", which
+        # is not evidence about the depth that actually failed.
+        warning = (
+            f"--layers reaches {max(depths)} but the tower is {full_depth} deep, so this "
+            f"sweep cannot reproduce the full encoder mismatch. Add {full_depth} or 'full'."
+        )
+        record["warning"] = warning
+        print(f"WARNING: {warning}", flush=True)
+    record["depths"] = depths
+    write(record)
+
     record["neuron_vs_cpu_by_depth"] = []
-    for depth in [int(k) for k in args.layers.split(",")]:
+    for depth in depths:
         tower.layers = torch.nn.ModuleList(list(all_layers)[:depth])
-        graph = Tower(tower).eval()
+        graph = Tower(tower, projector if args.with_projector else None).eval()
         with torch.no_grad():
             want = graph(features).float().numpy()
         started = time.perf_counter()
         traced = torch_neuronx.trace(graph, (features,), compiler_args=args.compiler_args.split())
         got = traced(features).float().numpy()
-        entry = compare(f"encoder_hidden_depth_{depth}", got, want)
+        tensor = "audio_embeds" if args.with_projector else "encoder_hidden"
+        entry = compare(f"{tensor}_depth_{depth}", got, want)
         entry["depth"] = depth
+        entry["is_full_depth"] = depth == full_depth
         entry["compile_seconds"] = round(time.perf_counter() - started, 1)
         record["neuron_vs_cpu_by_depth"].append(entry)
         print(json.dumps(entry, indent=2), flush=True)

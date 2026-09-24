@@ -29,6 +29,7 @@ Writes results/reference_forward.json and results/reference_forward.npz.
 import argparse
 import inspect
 import json
+import sys
 from pathlib import Path
 
 import numpy as np
@@ -151,6 +152,8 @@ def main() -> None:
             "assumes one, so either shorten the clip or decide on a window count first"
         )
 
+    import transformers
+
     facts = {
         "model_dir": str(model_dir),
         "wav": str(wav),
@@ -159,6 +162,13 @@ def main() -> None:
         "attn_implementation": args.attn,
         "prefill_tokens": int(input_ids.shape[1]),
         "mel_shape": list(input_features.shape),
+        # Which code produced this reference. Without it, a later parity gap cannot be
+        # told apart from the reference having been written by a different venv, and that
+        # ambiguity is exactly what stalled the first encoder parity result: the AMI vllm
+        # venv carries transformers 5.15 while the trace venv pins 4.56.
+        "transformers": transformers.__version__,
+        "torch": torch.__version__,
+        "python": sys.version.split()[0],
     }
 
     with torch.no_grad():
@@ -212,16 +222,11 @@ def main() -> None:
         "top1_text": processor.tokenizer.decode([int(top.indices[0][0])]),
     }
 
-    if not args.no_generate:
-        with torch.no_grad():
-            generated = model.generate(
-                input_ids=input_ids, input_features=input_features,
-                max_new_tokens=args.max_new_tokens, do_sample=False,
-            )
-        new_tokens = generated[0].tolist()[int(input_ids.shape[1]):]
-        facts["greedy_text"] = processor.tokenizer.decode(new_tokens, skip_special_tokens=True)
-        facts["greedy_new_tokens"] = len(new_tokens)
-
+    # The tensors go to disk before the optional greedy decode, not after. Both Neuron
+    # stages hard require this npz, and generate is the step most likely to OOM on a 16 GB
+    # host. Writing afterwards meant one OOM destroyed prefill tensors that had already
+    # computed correctly, and the run had to be repeated with --no-generate to get them back.
+    #
     # bfloat16 has no numpy equivalent, so everything is stored as float32. The widening
     # is exact, so the stored file is still the exact reference.
     npz = results / "reference_forward.npz"
@@ -243,7 +248,25 @@ def main() -> None:
         "prefill_logits": list(prefill_logits.shape),
     }
 
-    (results / "reference_forward.json").write_text(json.dumps(facts, indent=2), encoding="utf-8")
+    def save_facts() -> None:
+        (results / "reference_forward.json").write_text(
+            json.dumps(facts, indent=2), encoding="utf-8"
+        )
+
+    # The facts file lands with the npz too, so the two never disagree about what exists.
+    save_facts()
+
+    if not args.no_generate:
+        with torch.no_grad():
+            generated = model.generate(
+                input_ids=input_ids, input_features=input_features,
+                max_new_tokens=args.max_new_tokens, do_sample=False,
+            )
+        new_tokens = generated[0].tolist()[int(input_ids.shape[1]):]
+        facts["greedy_text"] = processor.tokenizer.decode(new_tokens, skip_special_tokens=True)
+        facts["greedy_new_tokens"] = len(new_tokens)
+        save_facts()
+
     print(json.dumps(facts, indent=2))
 
 

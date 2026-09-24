@@ -1,0 +1,56 @@
+Loading checkpoint shards:   0%|          | 0/2 [00:00<?, ?it/s]Loading checkpoint shards: 100%|██████████| 2/2 [00:00<00:00, 20.25it/s]
+..............
+Compiler status PASS
+{
+  "stage": "encoder",
+  "dtype": "bfloat16",
+  "attn_implementation": "eager",
+  "compiler_args": "--target=inf2 --model-type=transformer --auto-cast=none",
+  "reference_dtype": "bfloat16",
+  "reference_prefill_tokens": 601,
+  "wav_is_synthetic": true,
+  "instance": "inf2.xlarge",
+  "input_shape": [
+    1,
+    128,
+    3000
+  ],
+  "compiled": true,
+  "compile_seconds": 286.6,
+  "artifact": "/home/ubuntu/neuron_artifacts/voxtral_encoder_bfloat16.pt",
+  "artifact_mb": 1077.0,
+  "parity": [
+    {
+      "tensor": "encoder_hidden",
+      "shape": [
+        1,
+        1500,
+        1280
+      ],
+      "max_abs_diff": 23.3125,
+      "mean_abs_diff": 0.5862758410268958,
+      "relative_frobenius_error": 1.1095372124290332,
+      "cosine_similarity": 0.37242177,
+      "reference_abs_max": 21.0
+    },
+    {
+      "tensor": "audio_embeds",
+      "shape": [
+        375,
+        3072
+      ],
+      "max_abs_diff": 2.7890625,
+      "mean_abs_diff": 0.18570462306062513,
+      "relative_frobenius_error": 1.2656227861792575,
+      "cosine_similarity": 0.28256378,
+      "reference_abs_max": 1.9453125
+    }
+  ],
+  "graph_latency_ms": {
+    "p50": 82.05,
+    "p95": 82.13,
+    "min": 81.95,
+    "iters": 20,
+    "note": "single graph, one NeuronCore, batch 1, host to device copy included"
+  }
+}

@@ -1,0 +1,66 @@
+{
+  "model_dir": "/home/ubuntu/models/voxtral-mini-3b",
+  "wav": "/home/ubuntu/voxtral-neuron-router/results/reference_clip.wav",
+  "wav_is_synthetic": true,
+  "dtype": "bfloat16",
+  "attn_implementation": "eager",
+  "prefill_tokens": 601,
+  "mel_shape": [
+    1,
+    128,
+    3000
+  ],
+  "audio_span": {
+    "start": 225,
+    "count": 375,
+    "contiguous": true
+  },
+  "causal_mask": {
+    "shape": [
+      1,
+      1,
+      601,
+      601
+    ],
+    "built_on_host": true
+  },
+  "first_token": {
+    "top5_ids": [
+      17013,
+      2892,
+      1073,
+      69957,
+      35957
+    ],
+    "top5_logits": [
+      20.25,
+      20.0,
+      17.875,
+      16.75,
+      16.625
+    ],
+    "top1_text": "Please"
+  },
+  "npz": "results/reference_forward.npz",
+  "npz_mb": 21.7,
+  "tensor_shapes": {
+    "encoder_hidden": [
+      1,
+      1500,
+      1280
+    ],
+    "audio_embeds": [
+      375,
+      3072
+    ],
+    "inputs_embeds": [
+      1,
+      601,
+      3072
+    ],
+    "prefill_logits": [
+      1,
+      131072
+    ]
+  }
+}

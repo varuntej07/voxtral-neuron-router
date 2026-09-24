@@ -1,0 +1,40 @@
+
+===== tiny_linear_gelu
+.
+2026-09-24T04:13:46Z _dot.5 [INTERNAL_ERROR] [NCC_ISMP902] Simplifier error: is_subset(): incompatible function arguments. The following argument types are supported: - Please open a support ticket at https://github.com/aws-neuron/aws-neuron-sdk/issues/new. You may also be able to obtain more information using the 'XLA_IR_DEBUG' and 'XLA_HLO_DEBUG' environment variables.
+===== tiny_linear_gelu: FAILED ['neuronx-cc failed with 70']
+
+===== conv1d_frontend_fp32
+.
+2026-09-24T04:13:47Z _convolution.9 [INTERNAL_ERROR] [NCC_ISMP902] Simplifier error: is_subset(): incompatible function arguments. The following argument types are supported: - Please open a support ticket at https://github.com/aws-neuron/aws-neuron-sdk/issues/new. You may also be able to obtain more information using the 'XLA_IR_DEBUG' and 'XLA_HLO_DEBUG' environment variables.
+===== conv1d_frontend_fp32: FAILED ['neuronx-cc failed with 70']
+Loading checkpoint shards:   0%|          | 0/2 [00:00<?, ?it/s]Loading checkpoint shards: 100%|██████████| 2/2 [00:00<00:00, 27.28it/s]
+
+===== audio_tower_only_bfloat16
+.
+2026-09-24T04:14:07Z loc(unknown) [INTERNAL_ERROR] [NCC_ISMP902] Simplifier error: is_subset(): incompatible function arguments. The following argument types are supported: - Please open a support ticket at https://github.com/aws-neuron/aws-neuron-sdk/issues/new. You may also be able to obtain more information using the 'XLA_IR_DEBUG' and 'XLA_HLO_DEBUG' environment variables.
+===== audio_tower_only_bfloat16: FAILED ['neuronx-cc failed with 70']
+
+===== projector_only_bfloat16
+.
+2026-09-24T04:17:38Z _dot.7 [INTERNAL_ERROR] [NCC_ISMP902] Simplifier error: is_subset(): incompatible function arguments. The following argument types are supported: - Please open a support ticket at https://github.com/aws-neuron/aws-neuron-sdk/issues/new. You may also be able to obtain more information using the 'XLA_IR_DEBUG' and 'XLA_HLO_DEBUG' environment variables.
+===== projector_only_bfloat16: FAILED ['neuronx-cc failed with 70']
+Loading checkpoint shards:   0%|          | 0/2 [00:00<?, ?it/s]Loading checkpoint shards:  50%|█████     | 1/2 [00:27<00:27, 27.88s/it]Loading checkpoint shards: 100%|██████████| 2/2 [02:06<00:00, 69.41s/it]Loading checkpoint shards: 100%|██████████| 2/2 [02:06<00:00, 63.18s/it]
+
+===== audio_tower_only_float32
+......
+2026-09-24T04:22:39Z loc(unknown) [INTERNAL_ERROR] [NCC_ISMP902] Simplifier error: is_subset(): incompatible function arguments. The following argument types are supported: - Please open a support ticket at https://github.com/aws-neuron/aws-neuron-sdk/issues/new. You may also be able to obtain more information using the 'XLA_IR_DEBUG' and 'XLA_HLO_DEBUG' environment variables.
+===== audio_tower_only_float32: FAILED ['neuronx-cc failed with 70']
+
+===== projector_only_float32
+.
+2026-09-24T04:25:29Z _dot.7 [INTERNAL_ERROR] [NCC_ISMP902] Simplifier error: is_subset(): incompatible function arguments. The following argument types are supported: - Please open a support ticket at https://github.com/aws-neuron/aws-neuron-sdk/issues/new. You may also be able to obtain more information using the 'XLA_IR_DEBUG' and 'XLA_HLO_DEBUG' environment variables.
+===== projector_only_float32: FAILED ['neuronx-cc failed with 70']
+
+===== SUMMARY
+FAIL  tiny_linear_gelu
+FAIL  conv1d_frontend_fp32
+FAIL  audio_tower_only_bfloat16
+FAIL  projector_only_bfloat16
+FAIL  audio_tower_only_float32
+FAIL  projector_only_float32

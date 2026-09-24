@@ -1,0 +1,21 @@
+{
+  "encoder": {
+    "stage": "encoder",
+    "dtype": "bfloat16",
+    "attn_implementation": "eager",
+    "compiler_args": "--target=inf2 --model-type=transformer --auto-cast=none",
+    "reference_dtype": "bfloat16",
+    "reference_prefill_tokens": 601,
+    "wav_is_synthetic": true,
+    "instance": "inf2.xlarge",
+    "input_shape": [
+      1,
+      128,
+      3000
+    ],
+    "compiled": false,
+    "compile_seconds": 18.2,
+    "error": "Traceback (most recent call last):\n  File \"/home/ubuntu/voxtral-neuron-router/scripts/neuron_forward_smoke.py\", line 226, in main\n    traced = torch_neuronx.trace(\n             ^^^^^^^^^^^^^^^^^^^^\n  File \"/home/ubuntu/venv-trace/lib/python3.12/site-packages/torch_neuronx/xla_impl/trace.py\", line 603, in trace\n    neff_filename, metaneff, flattener, packer, weights = _trace(\n                                                          ^^^^^^^\n  File \"/home/ubuntu/venv-trace/lib/python3.12/site-packages/torch_neuronx/xla_impl/trace.py\", line 683, in _trace\n    neff_artifacts = generate_neff(\n                     ^^^^^^^^^^^^^^\n  File \"/home/ubuntu/venv-trace/lib/python3.12/site-packages/torch_neuronx/xla_impl/trace.py\", line 518, in generate_neff\n    neff_filename = hlo_compile(\n                    ^^^^^^^^^^^^\n  File \"/home/ubuntu/venv-trace/lib/python3.12/site-packages/torch_neuronx/xla_impl/trace.py\", line 341, in hlo_compile\n    raise RuntimeError(f\"neuronx-cc failed with {status}\")\nRuntimeError: neuronx-cc failed with 70\n",
+    "analysis": "{'torch_neuronx_version': '2.9.0.2.15.32035+de43f57c', 'neuronx_cc_version': '2.27.5334.0+f702b353', 'support_percentage': '100.00%', 'supported_operators': {'aten::to': 2, 'aten::_convolution': 2, 'aten::gelu': 35, 'aten::permute': 1, 'aten::add': 65, 'aten::dropout': 129, 'aten::layer_norm': 65, 'aten::size': 64, 'aten::linear': 194, 'aten::mul': 64, 'aten::view': 96, 'aten::transpose': 160, 'aten::contiguous': 160, 'aten::matmul': 64, 'aten::softmax': 32, 'aten::reshape': 33}, 'unsupported_operators': []}"
+  }
+}

@@ -1,0 +1,27 @@
+{
+  "started_utc": "2026-09-24T17:46:50+00:00",
+  "graph": "Linear(64,64) + gelu, bf16",
+  "compiler_args": "--target=inf2 --model-type=transformer --auto-cast=none",
+  "neuron_devices": [
+    "/dev/neuron0"
+  ],
+  "has_neuron_device": true,
+  "instance": "unrecorded",
+  "platform": "Linux x86_64",
+  "phase": "done",
+  "versions": {
+    "torch": "2.9.0+cpu",
+    "torch_neuronx": "2.9.0.2.15.32035+de43f57c",
+    "torch_xla": "2.9.0",
+    "libneuronxla": "2.2.17544.0+fb9962bf",
+    "transformers": "4.56.2",
+    "neuronx-cc": "2.26.6360.0+6f180f47"
+  },
+  "compiler_workdir": "/home/ubuntu/neuron_artifacts/workdir_canary",
+  "compiled": true,
+  "compile_seconds": 3.8,
+  "executed": true,
+  "max_abs_diff": 0.0078125,
+  "finite": true,
+  "verdict": "Toolchain compiles and executes. Proceed to the real graphs."
+}

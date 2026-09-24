@@ -1,0 +1,81 @@
+{
+  "dtype": "float32",
+  "reference_dtype": "bfloat16",
+  "transformers": "4.56.2",
+  "torch": "2.9.0+cpu",
+  "compiler_args": "--target=inf2 --model-type=transformer --auto-cast=none",
+  "cpu_vs_reference": [
+    {
+      "tensor": "encoder_hidden",
+      "shape": [
+        1,
+        1500,
+        1280
+      ],
+      "max_abs_diff": 8.659784317016602,
+      "mean_abs_diff": 0.013186906698224437,
+      "relative_frobenius_error": 0.05621050887703647,
+      "cosine_similarity": 0.99842081,
+      "reference_abs_max": 21.0,
+      "neuron_abs_max": 20.852846145629883,
+      "cosine_by_position": {
+        "0": 0.999706,
+        "1": 0.999755,
+        "2": 0.999737,
+        "375": 0.999956,
+        "750": 0.99919,
+        "1499": 0.999921
+      },
+      "cosine_by_position_mean": 0.998048,
+      "cosine_by_position_min": 0.34258
+    },
+    {
+      "tensor": "audio_embeds",
+      "shape": [
+        375,
+        3072
+      ],
+      "max_abs_diff": 0.2590954750776291,
+      "mean_abs_diff": 0.00392265856563945,
+      "relative_frobenius_error": 0.04626622526095963,
+      "cosine_similarity": 0.99892938,
+      "reference_abs_max": 1.9453125,
+      "neuron_abs_max": 1.98478364944458
+    }
+  ],
+  "full_depth": 32,
+  "with_projector": false,
+  "warning": "--layers reaches 0 but the tower is 32 deep, so this sweep cannot reproduce the full encoder mismatch. Add 32 or 'full'.",
+  "depths": [
+    0
+  ],
+  "neuron_vs_cpu_by_depth": [
+    {
+      "tensor": "encoder_hidden_depth_0",
+      "shape": [
+        1,
+        1500,
+        1280
+      ],
+      "max_abs_diff": 3.280694365501404,
+      "mean_abs_diff": 0.6765985709899076,
+      "relative_frobenius_error": 1.3439855997356132,
+      "cosine_similarity": 0.09752264,
+      "reference_abs_max": 4.4144110679626465,
+      "neuron_abs_max": 4.2322998046875,
+      "cosine_by_position": {
+        "0": 0.026871,
+        "1": 0.30419,
+        "2": 0.292593,
+        "375": 0.072494,
+        "750": 0.059136,
+        "1499": 0.101633
+      },
+      "cosine_by_position_mean": 0.097641,
+      "cosine_by_position_min": -0.007815,
+      "depth": 0,
+      "is_full_depth": false,
+      "compile_seconds": 13.0
+    }
+  ]
+}

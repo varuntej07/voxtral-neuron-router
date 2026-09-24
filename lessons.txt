@@ -1,0 +1,252 @@
+{
+  "_comment": "Facts about this project learned on real Trainium and Inferentia hardware, in JSON so an agent can load it without parsing prose. Bar for inclusion: it cost real time or money to find out, and a competent engineer would not have guessed it. Generic Linux, pip or ssh trivia does not belong here. Record the observation in evidence, and if a fix was only worked around rather than made, say so in status.",
+  "schema_version": 1,
+  "updated": "2026-09-24",
+  "lessons": [
+    {
+      "id": "ami-has-no-tracing-path",
+      "area": "inf2-environment",
+      "verified_on": "2026-09-23",
+      "host": "inf2.xlarge, Deep Learning AMI Neuron (Ubuntu 24.04), Neuron driver 2.30.2.0",
+      "lesson": "This AMI cannot run the torch_neuronx tracing workflow as shipped. It provides only two venvs, /opt/aws_neuronx_venv_jax_0_10 and /opt/aws_neuronx_venv_pytorch_inference_vllm_0_24_0_1_1_0, and neither has torch_neuronx, neuronx_distributed, or libneuronxla.",
+      "evidence": "ls -d /opt/aws_neuronx_venv_* returns exactly those two. In the vllm venv: torch 2.11.0, torch-xla 2.11.0, libtorch-neuronx-lite 2.11.0.1.0.1284, neuronx-cc 2.27.5334. import torch_neuronx raises ModuleNotFoundError. No libneuronpjrt.so exists anywhere on the box.",
+      "consequence": "The torch-xla route is also dead on arrival: PJRT_DEVICE=NEURON fails at torch_xla/_internal/neuron.py with ModuleNotFoundError: libneuronxla. libtorch_neuronx_lite is a vLLM-internal XLA and NKI helper, not a public trace API.",
+      "action": "Build a separate venv. Do not try to repair the vllm venv."
+    },
+    {
+      "id": "torch-neuronx-version-ceiling",
+      "area": "inf2-environment",
+      "verified_on": "2026-09-23",
+      "lesson": "torch-neuronx tops out at 2.9.0.2.15.32035, which pins torch 2.9. The AMI ships torch 2.11, so installing torch-neuronx into the vllm venv would downgrade torch and break vllm-neuron.",
+      "evidence": "pip index versions torch-neuronx lists 2.9.0.2.15.32035+de43f57c as newest.",
+      "action": "Separate venv with torch 2.9. The vLLM stack on this AMI is the newer trn2-era serving path, which is why it has no trace API at all."
+    },
+    {
+      "id": "cpu-torch-first-or-cuda-wheels-land",
+      "area": "inf2-environment",
+      "verified_on": "2026-09-23",
+      "lesson": "pip install torch-neuronx pulls the full nvidia CUDA wheel set onto an Inferentia box, roughly 6 GB of libraries that can never be used. Pin CPU torch first and the CUDA wheels never appear.",
+      "evidence": "First attempt installed nvidia-cublas-cu12, nvidia-cudnn-cu12, nvidia-nccl-cu12, nvidia-cusolver-cu12 and others, then died with OSError errno 28 no space left. Second attempt pinned torch first and finished with a pip list nvidia count of 0.",
+      "recipe": [
+        "python3 -m venv ~/venv-trace",
+        "export PIP_NO_CACHE_DIR=1",
+        "pip install torch==2.9.0 --index-url https://download.pytorch.org/whl/cpu",
+        "pip install 'torch-neuronx==2.9.*' 'neuronx-cc==2.26.6360.0' --extra-index-url https://pip.repos.neuron.amazonaws.com",
+        "pip install 'transformers==4.56.*' 'huggingface_hub>=0.34' 'mistral_common[audio]' soundfile librosa"
+      ],
+      "result": "torch 2.9.0+cpu, torch-neuronx 2.9.0.2.15.32035, torch-xla 2.9.0, libneuronxla 2.2.17544, neuronx-cc 2.26.6360.0, 0 nvidia packages. The compiler version is not optional, see pin-neuronx-cc-to-match-torch-neuronx."
+    },
+    {
+      "id": "pin-neuronx-cc-to-match-torch-neuronx",
+      "area": "neuron-compile",
+      "verified_on": "2026-09-23",
+      "lesson": "torch-neuronx declares no neuronx-cc version requirement, so pip will happily install a compiler that cannot compile anything it emits. With torch-neuronx 2.9.0.2.15 and neuronx-cc 2.27.5334, every graph fails. neuronx-cc 2.26.6360.0 works.",
+      "evidence": "Pinning neuronx-cc==2.* resolved to 2.27.5334. Under it, a single nn.Linear(64,64) plus gelu failed with the identical error as the full Voxtral encoder: [INTERNAL_ERROR] [NCC_ISMP902] Simplifier error: is_subset(): incompatible function arguments, surfacing as RuntimeError neuronx-cc failed with 70. Downgrading to 2.26.6360.0 compiled the same tiny graph on the first attempt. pip show torch-neuronx lists Requires: libneuronxla, numpy, protobuf, psutil, torch, torch-xla, with no compiler pin.",
+      "action": "Pin the compiler explicitly: pip install neuronx-cc==2.26.6360.0. Do not use neuronx-cc==2.*, which takes the newest and is built for the newer trn2 stack.",
+      "diagnostic": "Compile a 64x64 Linear plus gelu before anything else. It takes about 30 seconds and distinguishes a broken toolchain from a model problem. Skipping this check cost a 21 minute compile plus four wrong hypotheses about convs, dtype, the projector reshape and --model-type=transformer, all of which failed identically because nothing could compile."
+    },
+    {
+      "id": "activate-the-venv-do-not-call-its-python",
+      "area": "inf2-environment",
+      "verified_on": "2026-09-23",
+      "lesson": "import torch_neuronx fails unless the venv is activated, because it shells out to a libneuronpjrt-path executable that lives in the venv bin directory. Calling venv/bin/python directly leaves that directory off PATH.",
+      "evidence": "torch_neuronx/initialization/initializer.py line 88 runs subprocess.run(['libneuronpjrt-path']) and raised FileNotFoundError errno 2. The script was present at ~/venv-trace/bin/libneuronpjrt-path the whole time. source ~/venv-trace/bin/activate fixed it.",
+      "action": "Always source the activate script. This failure looks like a broken install and is not one."
+    },
+    {
+      "id": "root-volume-fills-fast",
+      "area": "inf2-environment",
+      "verified_on": "2026-09-23",
+      "lesson": "The 96 GB root volume fills quickly because the swapfile, the model, and the pip cache all live on it. Reached 96 percent full and broke an install.",
+      "evidence": "df showed 92G of 96G used. Breakdown: /swapfile 33G, ~/models 18G, ~/venv-trace 9.1G, ~/.cache/pip 9.4G.",
+      "action": "Set PIP_NO_CACHE_DIR=1. Delete consolidated.safetensors from the Voxtral download: it is a 9.3 GB Mistral-format duplicate of the model-0000N-of-00002.safetensors pair and from_pretrained never reads it, since it loads through model.safetensors.index.json. Reclaiming the cache, the duplicate, and a failed venv took the volume from 96 percent to 71 percent."
+    },
+    {
+      "id": "transformers-4-56-needs-librosa",
+      "area": "voxtral",
+      "verified_on": "2026-09-23",
+      "lesson": "The Voxtral chat template path in transformers 4.56 requires librosa, and mistral_common[audio] does not provide it. soundfile is not a substitute.",
+      "evidence": "processor.apply_chat_template raised ImportError from transformers/audio_utils.py load_audio_as requires_backends(['librosa']). Failed in 4.8 seconds, after the wav was already written.",
+      "action": "Install librosa in any venv that calls the Voxtral processor."
+    },
+    {
+      "id": "transformers-version-pin-rationale",
+      "area": "voxtral",
+      "verified_on": "2026-09-23",
+      "lesson": "Pin transformers 4.56 rather than taking 5.x on the trace box.",
+      "reason": "neuron_forward_smoke.py hands in a host-built causal mask because transformers builds masks with torch.vmap and torch.jit.trace cannot capture it, failing with an unhelpful invalid unordered_map key from functorch. That workaround, and the logits_to_keep keyword, are written against 4.5x masking_utils behavior. The AMI vllm venv carries transformers 5.15.0.",
+      "status": "The pin is applied. Whether 5.x actually breaks the mask path has not been tested."
+    },
+    {
+      "id": "name-the-inf2-target-in-compiler-args",
+      "area": "neuron-compile",
+      "verified_on": "2026-09-23",
+      "lesson": "neuronx-cc infers its target from the instance it runs on, so name --target=inf2 explicitly. Put it in the compiler_args string passed to torch_neuronx.trace, not only in NEURON_CC_FLAGS, because the argument passed to trace is what decides.",
+      "evidence": "neuron-ls on inf2.xlarge reports 1 NEURON DEVICE, 2 NEURON CORES, core ids 0-1, 32 GB device memory. neuron_forward_smoke.py passes args.compiler_args.split() straight into torch_neuronx.trace.",
+      "applied_in": [
+        "scripts/neuron_env_inf2.sh",
+        "scripts/neuron_forward_smoke.py"
+      ]
+    },
+    {
+      "id": "bank-the-npz-before-the-greedy-decode",
+      "area": "reference",
+      "verified_on": "2026-09-23",
+      "lesson": "reference_forward.py writes results/reference_forward.npz after the optional generate block, so an OOM during the greedy decode destroys the prefill tensors that already computed successfully. Both Neuron stages hard-require that npz.",
+      "action": "Run the first pass with --no-generate to bank the artifacts, then rerun for the greedy text. The default clip comes from deterministic_wav, a closed-form formula, so a rerun reproduces the same tensors and splitting the work costs no parity. Better fix: move np.savez above the generate block.",
+      "status": "Fixed on 2026-09-24. np.savez and the facts file now land above the generate block, so an OOM during the greedy decode can no longer destroy prefill tensors that already computed."
+    },
+    {
+      "id": "voxtral-decoder-head-width-is-explicit",
+      "area": "voxtral-architecture-documentation",
+      "verified_on": "2026-09-23",
+      "lesson": "Do not derive decoder head_dim from hidden_size / num_attention_heads. Voxtral Mini 3B has hidden_size 3072, 32 query heads, 8 KV heads and explicit head_dim 128: Q projects to 4096 while K and V project to 1024. The output projection returns 4096 to 3072.",
+      "evidence": "Primary checkpoint config: https://huggingface.co/mistralai/Voxtral-Mini-3B-2507/blob/main/config.json . Local results/reference_forward.json independently records decoder embedding width 3072.",
+      "status": "Verified from checkpoint configuration and local shape metadata, not from a successful Neuron compile. Documented in docs/pipeline-explorer."
+    },
+    {
+      "id": "blog-identical-failure-at-every-scale",
+      "area": "blog-material",
+      "verified_on": "2026-09-23",
+      "lesson": "The strongest story in the inf2 port: a 64x64 Linear plus gelu failed with byte for byte the same compiler error as the full 3B Voxtral encoder, and both passed one compiler version apart. Scale told you nothing about the cause.",
+      "evidence": "Under neuronx-cc 2.27.5334, six bisect cases failed identically (tiny_linear_gelu, conv1d_frontend_fp32, audio_tower_only in bf16 and fp32, projector_only in bf16 and fp32), all with [INTERNAL_ERROR] [NCC_ISMP902] Simplifier error: is_subset(). Under 2.26.6360.0 the tiny graph compiled on the first attempt. Logs: ~/logs/bisect.log on the inf2 box, and results/neuron_parity.json records the failed encoder attempt.",
+      "why_it_matters": "Four hypotheses were tested and discarded before the tiny graph was tried: --model-type=transformer, --optlevel=1, bf16 versus fp32, and the projector reshape. Each looked plausible against a Whisper style conv frontend. All were noise. The 30 second sanity compile should come first on any fresh Neuron toolchain, before any real graph.",
+      "screenshot": "Put the tiny graph FAIL on 2.27 next to the tiny graph PASS on 2.26 in one frame."
+    },
+    {
+      "id": "blog-full-op-support-still-does-not-compile",
+      "area": "blog-material",
+      "verified_on": "2026-09-23",
+      "lesson": "torch_neuronx.analyze reported 100 percent operator support with an empty unsupported list, while the same graph failed to compile. Operator coverage and compilability are different questions, and the Neuron docs lead you to conflate them.",
+      "evidence": "results/neuron_parity.json for the first encoder attempt carries support_percentage 100.00%, unsupported_operators [], and compiled false side by side. The supported set was 194 aten::linear, 160 aten::transpose, 160 aten::contiguous, 129 aten::dropout, 96 aten::view, 65 aten::add, 65 aten::layer_norm, 64 aten::matmul, 64 aten::mul, 64 aten::size, 35 aten::gelu, 33 aten::reshape, 32 aten::softmax, 2 aten::_convolution, 2 aten::to, 1 aten::permute.",
+      "why_it_matters": "analyze compiles each operator in isolation, so it proves every op has a Neuron implementation. It says nothing about whether the compiler survives the whole graph. A green analyze report next to a red compile is the clearest way to show that distinction.",
+      "screenshot": "The single JSON object with support_percentage 100.00% and compiled false visible together."
+    },
+    {
+      "id": "blog-constant-prefill-needs-no-bucketing",
+      "area": "blog-material",
+      "verified_on": "2026-09-23",
+      "lesson": "Because the mel is always the fixed 30 second window, the audio always costs exactly 375 token positions whether the speaker said one second or thirty. With a frozen tool catalog ahead of it, the inference prefill is genuinely constant at 601, not merely bounded. So the decoder needs one graph at one shape, with no padding and no buckets.",
+      "evidence": "results/prompt_shape.json probes clips of 1, 2, 3, 7, 15 and 30 seconds and records audio_tokens 375 and audio_start 225 for every one of them, with constant_regardless_of_clip_length true. results/reference_forward.json measured prefill_tokens 601, decomposing as 225 text plus 375 audio plus 1, with the audio span contiguous from offset 225.",
+      "why_it_matters": "Neuron compiles one graph per input shape, so variable length normally forces padded buckets. Padding here would also break correctness silently, because the decoder reads its answer from logits[:, -1, :], which is the true last token only while the sequence is exactly full. Pad to 768 and that index lands on padding. The 768 figure in prompt_shape.json is the training bucket, sized for answers up to 113 tokens, and does not belong in the inference path.",
+      "screenshot": "The by_clip_seconds block showing 375 repeated across every clip length."
+    },
+    {
+      "id": "encoder-compiles-but-output-is-wrong",
+      "area": "neuron-parity",
+      "verified_on": "2026-09-23",
+      "host": "inf2.xlarge, venv-trace, neuronx-cc 2.26.6360.0",
+      "lesson": "Under the pinned 2.26 compiler the Voxtral encoder plus projector compiled, but its output does not match the reference. A PASS from the compiler says nothing about whether the numbers are right.",
+      "evidence": "neuron_forward_smoke.py --stage encoder: Compiler status PASS, compile_seconds 286.6, artifact 1077 MB, graph latency p50 82.05 ms. Parity against results/reference_forward.npz: encoder_hidden cosine 0.372, relative Frobenius error 1.11; audio_embeds cosine 0.283, relative Frobenius error 1.27. Both inputs were bf16 on both sides.",
+      "status": "Narrowed on 2026-09-24, not yet fixed. The reference is exonerated and the bug is structural in the encoder front end. Three results, in the order they were taken. (1) encoder_bisect.py --cpu-only: CPU in venv-trace reproduces results/reference_forward.npz exactly, cosine 1.0 and max_abs_diff 0.0 on both encoder_hidden and audio_embeds, so the stale-npz candidate is dead and the Neuron graph is genuinely computing something else. (2) --layers 0, which is the conv frontend plus positional embeddings plus the final norm and no transformer layers at all, already fails at cosine 0.0975. So the fault is upstream of every attention layer, the causal mask, and depth accumulation. (3) The same depth 0 cut in float32 gives cosine 0.09752 against bfloat16's 0.09748, so dtype and the auto-cast arm are ruled out too. Remaining suspects are the two convolutions and the positional embedding addition, most likely a layout or channel-order difference.",
+      "why_it_matters": "The 82 ms latency is meaningless until parity holds, so it must not be quoted yet. The diagnosis is now cheap: depth 0 reproduces the whole bug in 10.8 s instead of 286.6 s, which is a 26x faster iteration on the same question.",
+      "screenshot": "The PASS line and the 0.37 cosine in the same terminal frame."
+    },
+    {
+      "id": "blog-voice-uses-monospace-not-tables",
+      "area": "blog-material",
+      "verified_on": "2026-09-24",
+      "lesson": "The five published posts at medium.com/@varuntej07 contain zero tables and 45 preformatted blocks. Numbers live either inline in prose or in space-aligned monospace. So run artifacts should render as fixed-width blocks, not markdown tables, or every number has to be reformatted by hand before it can be published.",
+      "evidence": "Counted over the full RSS feed: grep -c '<table' returns 0 across all five posts; '<pre>' appears 45 times. medium.com itself is behind a Cloudflare challenge that blocks headless browsing, but medium.com/feed/@varuntej07 serves the complete post bodies and is not blocked.",
+      "action": "scripts/report.py emits aligned fixed-width blocks at 78 columns with no markdown pipes, ready to paste into a <pre>.",
+      "why_it_matters": "Two other habits the artifacts should feed. Failure is the structure of these posts, not an aside: 'The Silence That Almost Killed the Project' runs attempt one, why it broke, attempt two, then what worked. And discovered constants are always reported with how they were found, as in 'About 500 milliseconds. I found that number by just sending longer and longer buffers until it worked. It is not documented anywhere.' lessons.txt already records in that shape, which is why report.py ends with a block built from the entries still marked open."
+    },
+    {
+      "id": "no-accuracy-eval-existed-until-now",
+      "area": "project-gap",
+      "verified_on": "2026-09-24",
+      "lesson": "The stated success criterion is that the fine-tuned model beats base Voxtral on a real-speech test set, and until 2026-09-24 nothing in the repo measured routing accuracy from audio at all. A full training run would have ended with an adapter and a falling loss curve while the headline claim stayed unmeasured.",
+      "evidence": "stress_test.py routes with gpt-4.1-mini as a stand-in for the router to size the prompt; it never loads Voxtral and never reads a wav. No other script computed accuracy. scripts/eval_routing.py now does, reusing tooling.score so a Voxtral number and a text-LLM number are computed by the same function.",
+      "action": "Measure base accuracy BEFORE training. After the adapter exists the base number needs a second model load to recover, and without it the delta cannot be quoted.",
+      "status": "Eval written, not yet run: it needs the model weights, which are on the instance and not on the dev laptop."
+    },
+    {
+      "id": "a-harness-that-only-writes-on-success-cannot-debug",
+      "area": "tooling",
+      "verified_on": "2026-09-24",
+      "lesson": "Three hours on an inf2 produced zero files in results/. The cause was not Neuron. neuron_forward_smoke.py wrote its record at exactly two points: line 276 on success, after compile and parity and 23 latency iterations, and line 248 on failure. Any interrupt, OOM or dropped SSH before those lines left nothing at all.",
+      "evidence": "results/ held only prompt_shape.json, reference_forward.json and report.txt after the session. neuron_parity.json was never created. The script contained one print statement, at line 277, with no flush=True, so a compile that runs for minutes is indistinguishable from a hang over SSH.",
+      "consequence": "Every hypothesis tested during those three hours was lost. The compile time, the error, and the phase it died in were all in memory only.",
+      "action": "Write the record before anything slow starts and again after every phase, print with flush=True, and run with python -u. encoder_bisect.py already did all of this, which is why it was the right tool for the same job and the smoke script was not.",
+      "status": "Fixed. checkpoint() now writes after every phase, a SIGINT and SIGTERM handler banks a partial record, and __main__ catches BaseException so a KeyboardInterrupt outside the handler still writes."
+    },
+    {
+      "id": "the-postmortem-ran-before-the-error-was-saved",
+      "area": "tooling",
+      "verified_on": "2026-09-24",
+      "lesson": "On a failed trace, torch_neuronx.analyze ran at line 245 and write(record) at line 248. analyze recompiles the graph operator by operator, which on a 3B model at 4 vCPU can take longer than the compile that just failed. Ctrl-C during it discarded the traceback the run existed to produce. The flag that skips it, --skip-analyze, defaulted to off.",
+      "why_it_matters": "This is the sharpest version of a general rule: a diagnostic step that runs before the result is banked can destroy the result. The more expensive the diagnostic, the more likely it is to be interrupted, and the more certain the loss.",
+      "action": "Save first, diagnose second. analyze is now opt in behind --analyze, and the error reaches disk before it runs.",
+      "status": "Fixed."
+    },
+    {
+      "id": "keying-results-on-the-stage-lets-a-toy-erase-the-real-run",
+      "area": "tooling",
+      "verified_on": "2026-09-24",
+      "lesson": "neuron_parity.json was keyed on record['stage'] alone, and the saved artifact on stage plus dtype alone. Adding a --layers debug flag would therefore have let a 30 second one layer compile silently overwrite the 286 second full encoder result, its 82 ms latency and its 1077 MB .pt, and --reuse would then have loaded the toy in place of the real artifact.",
+      "why_it_matters": "Found while adding the debug flags, before either was run. A cheap debug mode is only cheap if it cannot damage an expensive result.",
+      "action": "Truncated runs key on stage@L<n>@S<n> and carry the depth and length in the artifact filename, plus truncated: true and a note saying the numbers are not quotable. neuron_parity.json is now written atomically through a temp file and os.replace, so an interrupt mid-write cannot truncate the file and take the other stage's results with it."
+    },
+    {
+      "id": "prefix-truncation-of-the-decoder-is-exact",
+      "area": "neuron-compile",
+      "verified_on": "2026-09-24",
+      "lesson": "A --seq-len N debug run of the decoder is not an approximation. The mask is a plain unpadded lower triangle, so position i depends only on positions up to i, which makes the last logit of an N token prefix the same function the full run computes at position N-1.",
+      "evidence": "causal_mask(64) is byte for byte equal to causal_mask(601)[:64, :64]; verified locally. Slicing inputs_embeds is therefore enough, and the [1, 1, N, N] mask follows automatically because build_graph already sized it from the traced input.",
+      "why_it_matters": "It means a cheap truncated compile is a real parity test rather than a smoke signal, provided it is compared against a CPU run of the same cut rather than against the stored full length reference.",
+      "caveat": "The encoder has no equivalent. VoxtralEncoder raises unless the mel length is exactly max_source_positions*2, so the 30 s window is the contract. Depth is the only encoder knob, which is why --seq-len is rejected for that stage."
+    },
+    {
+      "id": "a-bisect-that-stops-short-of-full-depth-proves-nothing",
+      "area": "neuron-parity",
+      "verified_on": "2026-09-24",
+      "lesson": "encoder_bisect.py defaulted to --layers 0,1,8 against a 32 layer tower, so a clean run of the default sweep never traced the graph that produced the 0.372 cosine. It could only ever say that depths 0, 1 and 8 agree.",
+      "action": "The default is now 0,1,full, 'full' resolves from len(tower.layers) at runtime so it cannot go stale, and the script warns loudly when the list stops short of full depth.",
+      "related": "The sweep also traced a different graph from the one that failed: the tower alone, returning last_hidden_state, while neuron_forward_smoke.py traces the tower plus the reshape and projector. --with-projector closes that gap, otherwise a clean sweep next to a dirty smoke run leaves a hole rather than an answer."
+    },
+    {
+      "id": "the-reference-npz-did-not-record-what-wrote-it",
+      "area": "reference",
+      "verified_on": "2026-09-24",
+      "lesson": "results/reference_forward.json recorded dtype and shapes but not the transformers, torch or python version that produced the tensors. The leading hypothesis for the 0.372 encoder mismatch is that the npz was written by a different venv, and that hypothesis was unfalsifiable from the file itself.",
+      "action": "reference_forward.py now stamps transformers, torch and python into the facts. encoder_bisect.py already recorded them on its side, so the two can now be compared directly."
+    },
+    {
+      "id": "depth-0-reproduces-the-whole-encoder-bug",
+      "area": "neuron-parity",
+      "verified_on": "2026-09-24",
+      "host": "inf2.xlarge, venv-trace, neuronx-cc 2.26.6360.0, transformers 4.56.2",
+      "lesson": "The Voxtral encoder mismatch does not need the encoder. Cutting the tower to zero transformer layers, leaving only the conv frontend, the positional embeddings and the final norm, still reproduces it at cosine 0.0975. The compiler reports PASS both times.",
+      "evidence": "encoder_bisect.py --layers 0: cosine 0.09748 in bfloat16, compile 10.8 s. --layers 0 --dtype float32: cosine 0.09752, compile 13.0 s. --layers 1 is no better at 0.06545. The full 32 layer graph was cosine 0.372 after a 286.6 s compile. relative Frobenius error sits near 1.34 at depth 0 while the magnitudes match, neuron_abs_max 4.23 against reference 4.41, which is the signature of a different function rather than a degraded one.",
+      "why_it_matters": "It converts a five minute compile into an eleven second one for the same question, and it eliminates attention, the causal mask, depth accumulation and the projector in a single run. The projector only amplifies what the frontend already got wrong, which is why audio_embeds at 0.283 looks worse than encoder_hidden at 0.372.",
+      "action": "Iterate at --layers 0. The remaining suspects are the two convolutions and the positional embedding add. Isolate the convs alone next.",
+      "status": "Open. Cause not identified, but the search space is now the frontend only."
+    },
+    {
+      "id": "per-position-cosine-says-what-kind-of-bug-it-is",
+      "area": "neuron-parity",
+      "verified_on": "2026-09-24",
+      "lesson": "A single whole-tensor cosine cannot tell a layout bug from a positional one. The cosine computed per sequence position can. A value near 1.0 at position 0 that decays with position points at positional embeddings or the attention mask. A flat low value at every position points at channel layout or the front end.",
+      "evidence": "At depth 0 the profile is flat and near zero across the whole 1500 position sequence: 0.027 at position 0, 0.304 at 1, 0.293 at 2, 0.072 at 375, 0.059 at 750, 0.102 at 1499, mean 0.0976 and min -0.0078. Nothing decays, so nothing accumulates along the sequence.",
+      "action": "compare() in neuron_forward_smoke.py now emits cosine_by_position for any 3D tensor, plus neuron_abs_max beside the existing reference_abs_max so magnitude and direction can be read apart.",
+      "why_it_matters": "Combined with depth 0 and the fp32 result, the flat profile is what rules out the positional embedding as the primary suspect and points at the convolutions."
+    },
+    {
+      "id": "swap-does-not-survive-a-stop-start",
+      "area": "inf2-environment",
+      "verified_on": "2026-09-24",
+      "lesson": "The 32 GB swapfile that docs/inf2-bringup.md tells you to add is created with swapon, which does not persist across a stop and start. The file stays on the root volume and keeps occupying 32 of the 96 GB, but the instance boots with zero swap, so the first memory-hungry run dies.",
+      "evidence": "After restarting the instance, free -g showed Swap 0 total while ls -lh /swapfile showed the 32 G file still present and /etc/fstab had no swap entry. encoder_bisect.py --dtype float32 was OOM killed during the model load: dmesg recorded 'Out of memory: Killed process 2577 (python) total-vm:25561640kB, anon-rss:15368384kB' on a 15 GB host. The run produced no output at all, which looks like a hang rather than a kill.",
+      "action": "Add it to /etc/fstab once: echo '/swapfile none swap sw 0 0' | sudo tee -a /etc/fstab. Then swap comes back on every boot. Check free -g before any fp32 work on a 16 GB host.",
+      "status": "Fixed on the instance. The fstab line is in place and swap reports 31 GB."
+    },
+    {
+      "id": "compiler-workdirs-are-the-real-disk-hog",
+      "area": "inf2-environment",
+      "verified_on": "2026-09-24",
+      "lesson": "neuronx-cc leaves its scratch directory behind after every trace, and the decoder's is far larger than the artifact it produces. Two stale workdirs held 9.3 GB, which is more than the venv.",
+      "evidence": "du -sh showed ~/neuron_artifacts/workdir_decoder at 7.0 G and workdir_encoder at 2.3 G, on a volume that was at 96 percent with 4.1 GB free. Deleting both took it to 87 percent with 14 GB free. The decoder workdir survived from a compile that never even produced a usable artifact.",
+      "action": "Delete workdir_* between runs. They are regenerable scratch, unlike the .pt artifacts next to them. Together with the unmounted swapfile this is why the volume looked full for reasons that had nothing to do with the model."
+    }
+  ]
+}
