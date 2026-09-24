@@ -46,6 +46,7 @@ import librosa
 import numpy as np
 import soundfile as sf
 import torch
+import transformers
 from google.colab import drive, files
 from IPython.display import Audio, display
 from kokoro_onnx import Kokoro
@@ -54,6 +55,7 @@ from transformers import pipeline
 
 # phonemizer warns "words count mismatch" on nearly every line; the Whisper check covers real errors.
 logging.getLogger("phonemizer").setLevel(logging.ERROR)
+transformers.logging.set_verbosity_error()  # otherwise repeats a max_length notice every batch
 
 DRIVE_DIR = Path("/content/drive/MyDrive/voxtral-audio")
 AUDIO_DIR = DRIVE_DIR / "audio"
@@ -140,8 +142,31 @@ asr = pipeline("automatic-speech-recognition", model="openai/whisper-large-v3",
 
 
 def normalize(text: str) -> str:
-    """Whisper's English normalizer: case, punctuation, and 'six PM' == '6 pm'."""
-    return asr.tokenizer.normalize(spoken(text))
+    """Whisper's English normalizer: case, punctuation, and 'six PM' == '6 pm'.
+
+    It leaves 'p.m.' as 'p m' and '3:30' as '3 30' while 'three thirty' becomes '330',
+    so those two forms are folded first.
+    """
+    text = re.sub(r"\b([ap])\.\s?m\.?", r"\1m", spoken(text), flags=re.IGNORECASE)
+    text = re.sub(r"(\d):(\d\d)\b", r"\1\2", text)
+    return asr.tokenizer.normalize(text)
+
+
+# Whisper spells filler sounds many ways ("Hmm" came back as "Hum", "And"; "Uh" as "Ah").
+# The route never depends on them, so they are dropped from both sides before comparing.
+FILLERS = {"hmm", "hm", "hum", "uh", "uhm", "um", "ah", "ahh", "oh", "er", "erm", "eh", "mm", "huh"}
+
+
+def matches(text: str, heard: str) -> bool:
+    expected, got = normalize(text).split(), normalize(heard).split()
+    if expected == got:
+        return True
+    if not FILLERS & set(re.findall(r"[a-z]+", text.lower())):
+        return False
+    expected, got = [w for w in expected if w not in FILLERS], [w for w in got if w not in FILLERS]
+    if text.lower().split()[0].strip(",.") in FILLERS and got[:1] == ["and"] and expected[:1] != ["and"]:
+        got = got[1:]  # a leading filler heard as "and"
+    return expected == got
 
 
 def pick_voice(clip_id: str, attempt: int) -> dict:
@@ -203,6 +228,10 @@ def show(records: list) -> None:
 # ---------------------------------------------------------------- speak, check, redo misses
 
 manifest = load_manifest()
+for rec in manifest.values():  # re-score earlier checks under the current rule, no re-speaking
+    rec["ok"] = matches(rec["text"], rec["heard"])
+if manifest:
+    save_manifest(manifest)
 previewed = False
 while True:
     todo = [r for r in rows
@@ -227,7 +256,7 @@ while True:
                             "seconds": round(len(audio) / SAMPLE_RATE, 2)})
         for rec, heard in zip(records, transcribe(audios)):
             expected, got = normalize(rec["text"]), normalize(heard)
-            rec.update(heard=heard, ok=expected == got, wer=round(jiwer.wer(expected, got), 3))
+            rec.update(heard=heard, ok=matches(rec["text"], heard), wer=round(jiwer.wer(expected, got), 3))
             manifest[rec["id"]] = rec
         save_manifest(manifest)
 
