@@ -1,0 +1,120 @@
+"""Prove the trn1 instance can do what the training run needs, before the training run.
+
+Every check here is something that fails slowly and confusingly if you find it during
+training instead of now. It takes a couple of minutes and compiles one small graph.
+
+    source scripts/neuron_env.sh
+    python scripts/neuron_preflight.py
+
+Writes results/neuron_preflight.json.
+"""
+
+import json
+import os
+import subprocess
+import time
+from pathlib import Path
+
+ROOT = Path(__file__).resolve().parents[1]
+WANT_ENV = ["NEURON_CC_FLAGS", "NEURON_RT_NUM_CORES", "NEURON_COMPILE_CACHE_URL"]
+
+
+def run(cmd: list[str]) -> str:
+    try:
+        out = subprocess.run(cmd, capture_output=True, text=True, timeout=120)
+        return (out.stdout or out.stderr).strip()
+    except (OSError, subprocess.SubprocessError) as exc:
+        return f"unavailable: {exc}"
+
+
+def versions() -> dict:
+    import importlib
+
+    found = {}
+    for name in ("torch", "torch_xla", "torch_neuronx", "neuronx_distributed",
+                 "transformers", "peft", "mistral_common"):
+        try:
+            found[name] = getattr(importlib.import_module(name), "__version__", "present")
+        except ImportError:
+            found[name] = None
+    return found
+
+
+def compile_probe() -> dict:
+    """Compile and run one tiny graph, twice.
+
+    The first call pays compilation, the second should hit the cache. If the second is
+    as slow as the first, NEURON_COMPILE_CACHE_URL is not being honoured and every
+    training restart will pay full compile time.
+    """
+    import torch
+    import torch_xla.core.xla_model as xm
+
+    device = xm.xla_device()
+    timings, value = [], float("nan")
+    for _ in range(2):
+        started = time.time()
+        a = torch.randn(256, 256, device=device, dtype=torch.bfloat16)
+        b = torch.randn(256, 256, device=device, dtype=torch.bfloat16)
+        c = (a @ b).sum()
+        xm.mark_step()
+        value = c.item()
+        timings.append(round(time.time() - started, 2))
+    return {"seconds": timings, "finite": bool(value == value), "cache_hit": timings[1] < timings[0] / 2}
+
+
+def shape_check() -> dict:
+    """The cache has to exist and agree with what the training step assumes."""
+    meta_path = ROOT / "data" / "cache" / "train.meta.json"
+    if not meta_path.exists():
+        return {"ok": False, "reason": "run scripts/prepare_sft_cache.py first"}
+    meta = json.loads(meta_path.read_text(encoding="utf-8"))
+    keep = meta["seq"] - meta["prompt_len"] + 1
+    return {
+        "ok": meta["longest_row"] <= meta["seq"] and keep > 1,
+        "seq": meta["seq"],
+        "prompt_len": meta["prompt_len"],
+        "logits_kept": keep,
+        "audio_span": [meta["audio_span_start"], meta["audio_span_start"] + meta["audio_span_width"]],
+        "built_from_silence": meta.get("silence", False),
+    }
+
+
+def main() -> None:
+    report = {
+        "env": {k: os.environ.get(k) for k in WANT_ENV},
+        "missing_env": [k for k in WANT_ENV if not os.environ.get(k)],
+        "neuron_devices": run(["neuron-ls"]),
+        "versions": versions(),
+        "shapes": shape_check(),
+    }
+
+    if report["versions"].get("torch_xla"):
+        try:
+            report["compile_probe"] = compile_probe()
+        except Exception as exc:  # a failure here is the point of the check
+            report["compile_probe"] = {"failed": str(exc)}
+    else:
+        report["compile_probe"] = {"skipped": "torch_xla not installed"}
+
+    blocking = []
+    if report["missing_env"]:
+        blocking.append(f"unset env: {', '.join(report['missing_env'])}, source scripts/neuron_env.sh")
+    for name in ("torch_xla", "torch_neuronx", "peft", "transformers"):
+        if not report["versions"].get(name):
+            blocking.append(f"{name} is not installed")
+    if not report["shapes"].get("ok"):
+        blocking.append(f"cache not usable: {report['shapes'].get('reason', 'shapes disagree')}")
+    if report["compile_probe"].get("failed"):
+        blocking.append("a one-line graph did not compile, nothing else will")
+    report["blocking"] = blocking
+
+    out = ROOT / "results" / "neuron_preflight.json"
+    out.parent.mkdir(exist_ok=True)
+    out.write_text(json.dumps(report, indent=2), encoding="utf-8")
+    print(json.dumps(report, indent=2))
+    print("\nREADY" if not blocking else "\nNOT READY:\n  " + "\n  ".join(blocking))
+
+
+if __name__ == "__main__":
+    main()
