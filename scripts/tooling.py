@@ -3,6 +3,7 @@
 import json
 import os
 import re
+from collections import Counter
 from functools import lru_cache
 from pathlib import Path
 
@@ -85,3 +86,29 @@ def args_valid(tool_name: str, arguments: dict) -> bool:
 def read_rows(split: str | None = None) -> list[dict]:
     rows = [json.loads(line) for line in ROWS_PATH.read_text(encoding="utf-8").splitlines() if line.strip()]
     return [r for r in rows if split is None or r["split"] == split]
+
+
+def score(rows: list[dict], preds: dict[str, tuple[str, dict]]) -> dict:
+    """Routing quality for any router: predictions are {row id: (tool name, arguments)}.
+
+    Model agnostic on purpose. The text stand-in in stress_test.py and Voxtral itself in
+    eval_routing.py are scored by this same function, so their numbers are comparable.
+
+    Accuracy alone hides the two failures that matter in a voice product. Firing a tool
+    when the user only wanted to talk is a false trigger, and staying silent when they
+    asked for something is a missed call. They trade against each other, so both are
+    reported next to the accuracy rather than folded into it.
+    """
+    scored = [(r, preds[r["id"]]) for r in rows if r["id"] in preds]
+    gold_tool = [(r, p) for r, p in scored if r["tool"] != NO_TOOL]
+    gold_none = [(r, p) for r, p in scored if r["tool"] == NO_TOOL]
+    correct = [(r, p) for r, p in scored if p[0] == r["tool"]]
+    confusions = Counter(f"{r['tool']} -> {p[0]}" for r, p in scored if p[0] != r["tool"])
+    return {
+        "n": len(scored),
+        "tool_accuracy": len(correct) / max(len(scored), 1),
+        "false_trigger_rate": sum(p[0] != NO_TOOL for _, p in gold_none) / max(len(gold_none), 1),
+        "missed_call_rate": sum(p[0] == NO_TOOL for _, p in gold_tool) / max(len(gold_tool), 1),
+        "arg_keys_match": sum(set(p[1]) == set(r["arguments"]) for r, p in correct) / max(len(correct), 1),
+        "top_confusions": confusions.most_common(8),
+    }

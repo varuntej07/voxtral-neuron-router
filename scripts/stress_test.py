@@ -24,7 +24,7 @@ import re
 from collections import Counter
 
 from llm_batch import cached_count, request_key, run_batch, usage_totals
-from tooling import (DEFAULT_MODEL, NO_TOOL, RESULTS_DIR, compact_catalog, label_space,
+from tooling import (DEFAULT_MODEL, NO_TOOL, RESULTS_DIR, compact_catalog, label_space, score,
                      load_tools, names_catalog, openai_tools, read_rows)
 
 USD_PER_M_INPUT = 0.20  # gpt-4.1-mini batch price; check current pricing
@@ -106,22 +106,6 @@ def parse(variant: str, response: dict) -> tuple[str, dict]:
         return out["tool"], json.loads(out["arguments_json"] or "{}")
     except (json.JSONDecodeError, KeyError, TypeError):
         return "<unparseable>", {}
-
-
-def score(rows: list[dict], preds: dict[str, tuple[str, dict]]) -> dict:
-    scored = [(r, preds[r["id"]]) for r in rows if r["id"] in preds]
-    gold_tool = [(r, p) for r, p in scored if r["tool"] != NO_TOOL]
-    gold_none = [(r, p) for r, p in scored if r["tool"] == NO_TOOL]
-    correct = [(r, p) for r, p in scored if p[0] == r["tool"]]
-    confusions = Counter(f"{r['tool']} -> {p[0]}" for r, p in scored if p[0] != r["tool"])
-    return {
-        "n": len(scored),
-        "tool_accuracy": len(correct) / max(len(scored), 1),
-        "false_trigger_rate": sum(p[0] != NO_TOOL for _, p in gold_none) / max(len(gold_none), 1),
-        "missed_call_rate": sum(p[0] == NO_TOOL for _, p in gold_tool) / max(len(gold_tool), 1),
-        "arg_keys_match": sum(set(p[1]) == set(r["arguments"]) for r, p in correct) / max(len(correct), 1),
-        "top_confusions": confusions.most_common(8),
-    }
 
 
 def main() -> None:

@@ -4,3 +4,9 @@ data/audio/
 __pycache__/
 *.pyc
 *.log
+results/*.npz
+results/reference_clip.wav
+data/audio.zip
+results/report.txt
+data/audio_real/
+results/*.pred.jsonl
