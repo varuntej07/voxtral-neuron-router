@@ -1,0 +1,4 @@
+I | convolution transpose add call -> GeluForwardImpl.41 convolution transpose add call -> GeluForwardImpl.54 transpose convert multiply add convert batch-norm-training get-tuple-element convert multiply multiply add tuple
+I | subcomputations: [('HloGeluForwardImpl.38', ['AwsNeuronGelu']), ('GeluForwardImpl.41', []), ('HloGeluForwardImpl.51', ['AwsNeuronGelu']), ('GeluForwardImpl.54', [])]
+J3 | convolution transpose add multiply erf add multiply multiply convolution transpose add multiply erf add multiply multiply transpose convert multiply add convert batch-norm-training get-tuple-element convert multiply multiply add tuple
+J3 | subcomputations: []

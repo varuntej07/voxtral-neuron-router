@@ -176,7 +176,8 @@ def causal_mask(seq_len: int, dtype):
     return torch.triu(mask, diagonal=1)[None, None]
 
 
-def build_graph(stage: str, model_dir: Path, dtype, attn: str, inputs, layers: int | None = None):
+def build_graph(stage: str, model_dir: Path, dtype, attn: str, inputs, layers: int | None = None,
+                position_fix: bool = True):
     """Return (module, output_names, want, full_depth). The wrapper keeps only the
     submodules the stage needs so the rest of the 3B can be freed before compiling.
 
@@ -199,6 +200,11 @@ def build_graph(stage: str, model_dir: Path, dtype, attn: str, inputs, layers: i
             if layers > full_depth:
                 raise SystemExit(f"--layers {layers} exceeds the encoder depth {full_depth}")
             tower.layers = torch.nn.ModuleList(list(tower.layers)[:layers])
+        if position_fix:
+            # neuronx-cc misreads a weight added right after a permute; see neuron_patches.py
+            # and repro_permute_add.py. Identical math on CPU, so the baseline is unchanged.
+            from neuron_patches import patch_encoder_positions
+            patch_encoder_positions(tower)
 
         class EncoderGraph(torch.nn.Module):
             def __init__(self, tower, projector):
@@ -319,6 +325,9 @@ def main() -> None:
                         help="stop after the compile. This is what makes a host with no "
                              "Neuron device useful: compiling is a host CPU job, only "
                              "executing the NEFF needs a chip")
+    parser.add_argument("--no-position-fix", action="store_true",
+                        help="trace the stock HF encoder forward, which hits the permute-then-add "
+                             "weight layout bug (cosine 0.372); only for reproducing it")
     parser.add_argument("--dump-outputs", action="store_true",
                         help="save the raw Neuron tensors so the next hypothesis about a "
                              "parity gap costs no recompile")
@@ -361,6 +370,7 @@ def main() -> None:
         "dtype": args.dtype,
         "attn_implementation": args.attn,
         "compiler_args": args.compiler_args,
+        "position_fix": args.stage == "encoder" and not args.no_position_fix,
         "layers": args.layers,
         "seq_len_override": args.seq_len,
         "truncated": truncated,
@@ -403,7 +413,8 @@ def main() -> None:
     else:
         checkpoint(f"loading the model and building the {args.stage} graph")
         graph, names, want, full_depth = build_graph(
-            args.stage, Path(args.model).expanduser(), dtype, args.attn, inputs, args.layers
+            args.stage, Path(args.model).expanduser(), dtype, args.attn, inputs, args.layers,
+            position_fix=not args.no_position_fix,
         )
         checkpoint("cpu baseline done", full_depth=full_depth)
         print(f"    compiler workdir: {record['compiler_workdir']}", flush=True)
@@ -510,6 +521,8 @@ def record_key(record: dict) -> str:
         key += f"@L{record['layers']}"
     if record.get("seq_len_override") is not None:
         key += f"@S{record['seq_len_override']}"
+    if record["stage"] == "encoder" and not record.get("position_fix", False):
+        key += "@nofix"  # the known-broken stock forward, kept apart from the real result
     return key
 
 

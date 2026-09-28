@@ -1,0 +1,428 @@
+{
+  "dtype": "bfloat16",
+  "transformers": "4.56.2",
+  "torch": "2.9.0+cpu",
+  "python": "3.12.3",
+  "compiler_args": "--target=inf2 --model-type=transformer --auto-cast=none",
+  "instance": "inf2.xlarge",
+  "impulse": {
+    "bin": 40,
+    "frame": 100
+  },
+  "pass_cosine": 0.999,
+  "graphs": {
+    "J1": {
+      "input": "mel",
+      "input_shape": [
+        1,
+        128,
+        3000
+      ],
+      "compiled": true,
+      "compile_seconds": 3.8,
+      "real": {
+        "tensor": "J1_real",
+        "shape": [
+          1,
+          1500,
+          1280
+        ],
+        "max_abs_diff": 0.03125,
+        "mean_abs_diff": 0.0013335329611354003,
+        "relative_frobenius_error": 0.003812259366644019,
+        "cosine_similarity": 0.99999274,
+        "reference_abs_max": 4.40625,
+        "neuron_abs_max": 4.40625,
+        "cosine_by_position": {
+          "0": 0.99999,
+          "1": 0.999989,
+          "2": 0.999986,
+          "375": 0.999993,
+          "750": 0.999994,
+          "1499": 0.999994
+        },
+        "cosine_by_position_mean": 0.999993,
+        "cosine_by_position_min": 0.999985,
+        "cosine_by_channel": {
+          "mean": 0.999992,
+          "min": 0.999935,
+          "channels_below_0.9": 0,
+          "of": 1280,
+          "worst_channels": {
+            "618": 0.9999,
+            "596": 1.0,
+            "595": 1.0,
+            "620": 1.0,
+            "615": 1.0
+          }
+        }
+      },
+      "impulse": {
+        "tensor": "J1_impulse",
+        "shape": [
+          1,
+          1500,
+          1280
+        ],
+        "max_abs_diff": 0.0234375,
+        "mean_abs_diff": 0.0011849763162007246,
+        "relative_frobenius_error": 0.003549409935295828,
+        "cosine_similarity": 0.9999937,
+        "reference_abs_max": 2.421875,
+        "neuron_abs_max": 2.421875,
+        "cosine_by_position": {
+          "0": 0.999994,
+          "1": 0.99999,
+          "2": 0.999987,
+          "375": 0.999994,
+          "750": 0.999994,
+          "1499": 0.999994
+        },
+        "cosine_by_position_mean": 0.999994,
+        "cosine_by_position_min": 0.999987,
+        "cosine_by_channel": {
+          "mean": 0.999993,
+          "min": 0.999935,
+          "channels_below_0.9": 0,
+          "of": 1280,
+          "worst_channels": {
+            "639": 0.9999,
+            "630": 0.9999,
+            "633": 1.0,
+            "596": 1.0,
+            "624": 1.0
+          }
+        },
+        "active_frames_cpu": [
+          0,
+          1,
+          2,
+          3,
+          4,
+          5,
+          6,
+          7,
+          8,
+          9,
+          10,
+          11,
+          "..."
+        ],
+        "active_frames_neuron": [
+          0,
+          1,
+          2,
+          3,
+          4,
+          5,
+          6,
+          7,
+          8,
+          9,
+          10,
+          11,
+          "..."
+        ]
+      },
+      "pass": true
+    },
+    "J2": {
+      "input": "mel",
+      "input_shape": [
+        1,
+        128,
+        3000
+      ],
+      "compiled": true,
+      "compile_seconds": 3.8,
+      "real": {
+        "tensor": "J2_real",
+        "shape": [
+          1,
+          1500,
+          1280
+        ],
+        "max_abs_diff": 0.03125,
+        "mean_abs_diff": 0.0013335329611354003,
+        "relative_frobenius_error": 0.003812259366644019,
+        "cosine_similarity": 0.99999274,
+        "reference_abs_max": 4.40625,
+        "neuron_abs_max": 4.40625,
+        "cosine_by_position": {
+          "0": 0.99999,
+          "1": 0.999989,
+          "2": 0.999986,
+          "375": 0.999993,
+          "750": 0.999994,
+          "1499": 0.999994
+        },
+        "cosine_by_position_mean": 0.999993,
+        "cosine_by_position_min": 0.999985,
+        "cosine_by_channel": {
+          "mean": 0.999992,
+          "min": 0.999935,
+          "channels_below_0.9": 0,
+          "of": 1280,
+          "worst_channels": {
+            "618": 0.9999,
+            "596": 1.0,
+            "595": 1.0,
+            "620": 1.0,
+            "615": 1.0
+          }
+        }
+      },
+      "impulse": {
+        "tensor": "J2_impulse",
+        "shape": [
+          1,
+          1500,
+          1280
+        ],
+        "max_abs_diff": 0.0234375,
+        "mean_abs_diff": 0.0011849763162007246,
+        "relative_frobenius_error": 0.003549409935295828,
+        "cosine_similarity": 0.9999937,
+        "reference_abs_max": 2.421875,
+        "neuron_abs_max": 2.421875,
+        "cosine_by_position": {
+          "0": 0.999994,
+          "1": 0.99999,
+          "2": 0.999987,
+          "375": 0.999994,
+          "750": 0.999994,
+          "1499": 0.999994
+        },
+        "cosine_by_position_mean": 0.999994,
+        "cosine_by_position_min": 0.999987,
+        "cosine_by_channel": {
+          "mean": 0.999993,
+          "min": 0.999935,
+          "channels_below_0.9": 0,
+          "of": 1280,
+          "worst_channels": {
+            "639": 0.9999,
+            "630": 0.9999,
+            "633": 1.0,
+            "596": 1.0,
+            "624": 1.0
+          }
+        },
+        "active_frames_cpu": [
+          0,
+          1,
+          2,
+          3,
+          4,
+          5,
+          6,
+          7,
+          8,
+          9,
+          10,
+          11,
+          "..."
+        ],
+        "active_frames_neuron": [
+          0,
+          1,
+          2,
+          3,
+          4,
+          5,
+          6,
+          7,
+          8,
+          9,
+          10,
+          11,
+          "..."
+        ]
+      },
+      "pass": true
+    },
+    "J3": {
+      "input": "mel",
+      "input_shape": [
+        1,
+        128,
+        3000
+      ],
+      "compiled": true,
+      "compile_seconds": 3.8,
+      "real": {
+        "tensor": "J3_real",
+        "shape": [
+          1,
+          1500,
+          1280
+        ],
+        "max_abs_diff": 0.03125,
+        "mean_abs_diff": 0.0013335329611354003,
+        "relative_frobenius_error": 0.003812259366644019,
+        "cosine_similarity": 0.99999274,
+        "reference_abs_max": 4.40625,
+        "neuron_abs_max": 4.40625,
+        "cosine_by_position": {
+          "0": 0.99999,
+          "1": 0.999989,
+          "2": 0.999986,
+          "375": 0.999993,
+          "750": 0.999994,
+          "1499": 0.999994
+        },
+        "cosine_by_position_mean": 0.999993,
+        "cosine_by_position_min": 0.999985,
+        "cosine_by_channel": {
+          "mean": 0.999992,
+          "min": 0.999935,
+          "channels_below_0.9": 0,
+          "of": 1280,
+          "worst_channels": {
+            "618": 0.9999,
+            "596": 1.0,
+            "595": 1.0,
+            "620": 1.0,
+            "615": 1.0
+          }
+        }
+      },
+      "impulse": {
+        "tensor": "J3_impulse",
+        "shape": [
+          1,
+          1500,
+          1280
+        ],
+        "max_abs_diff": 0.0234375,
+        "mean_abs_diff": 0.0011849763162007246,
+        "relative_frobenius_error": 0.003549409935295828,
+        "cosine_similarity": 0.9999937,
+        "reference_abs_max": 2.421875,
+        "neuron_abs_max": 2.421875,
+        "cosine_by_position": {
+          "0": 0.999994,
+          "1": 0.99999,
+          "2": 0.999987,
+          "375": 0.999994,
+          "750": 0.999994,
+          "1499": 0.999994
+        },
+        "cosine_by_position_mean": 0.999994,
+        "cosine_by_position_min": 0.999987,
+        "cosine_by_channel": {
+          "mean": 0.999993,
+          "min": 0.999935,
+          "channels_below_0.9": 0,
+          "of": 1280,
+          "worst_channels": {
+            "639": 0.9999,
+            "630": 0.9999,
+            "633": 1.0,
+            "596": 1.0,
+            "624": 1.0
+          }
+        },
+        "active_frames_cpu": [
+          0,
+          1,
+          2,
+          3,
+          4,
+          5,
+          6,
+          7,
+          8,
+          9,
+          10,
+          11,
+          "..."
+        ],
+        "active_frames_neuron": [
+          0,
+          1,
+          2,
+          3,
+          4,
+          5,
+          6,
+          7,
+          8,
+          9,
+          10,
+          11,
+          "..."
+        ]
+      },
+      "pass": true
+    }
+  },
+  "neuronx_cc": "2.26.6360.0+6f180f47",
+  "cpu_checks": {
+    "A_mm_vs_A": {
+      "tensor": "A_mm_vs_A",
+      "shape": [
+        1,
+        1280,
+        3000
+      ],
+      "max_abs_diff": 0.03125,
+      "mean_abs_diff": 0.0002461313522668206,
+      "relative_frobenius_error": 0.00636447849187989,
+      "cosine_similarity": 0.99998358,
+      "reference_abs_max": 3.5625,
+      "neuron_abs_max": 3.578125,
+      "cosine_by_position": {
+        "0": 0.999998,
+        "1": 0.999987,
+        "2": 0.999994,
+        "320": 0.99999,
+        "640": 0.999999,
+        "1279": 0.999995
+      },
+      "cosine_by_position_mean": 0.999959,
+      "cosine_by_position_min": 0.995045
+    },
+    "B_mm_vs_B": {
+      "tensor": "B_mm_vs_B",
+      "shape": [
+        1,
+        1280,
+        1500
+      ],
+      "max_abs_diff": 0.03125,
+      "mean_abs_diff": 0.00035807451464837264,
+      "relative_frobenius_error": 0.004182044218722962,
+      "cosine_similarity": 0.99999126,
+      "reference_abs_max": 5.03125,
+      "neuron_abs_max": 5.03125,
+      "cosine_by_position": {
+        "0": 0.999999,
+        "1": 0.999999,
+        "2": 0.999999,
+        "320": 0.999993,
+        "640": 1.0,
+        "1279": 0.999994
+      },
+      "cosine_by_position_mean": 0.999997,
+      "cosine_by_position_min": 0.999837
+    },
+    "impulse_A_active_frames_cpu": [
+      0,
+      1,
+      2,
+      3,
+      4,
+      5,
+      6,
+      7,
+      8,
+      9,
+      10,
+      11,
+      "..."
+    ]
+  },
+  "first_failing_graph": null,
+  "graphs_compiled": 3
+}

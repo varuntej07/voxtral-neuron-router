@@ -1,0 +1,25 @@
+{
+  "shape": [
+    1,
+    8,
+    16
+  ],
+  "compiler_args": "--target=inf2 --auto-cast=none",
+  "cases": {
+    "buffer": {
+      "cosine_vs_cpu": 0.602763,
+      "max_abs_diff": 3.663954734802246,
+      "cosine_vs_pos_read_as_CxT": 1.0
+    },
+    "input": {
+      "cosine_vs_cpu": 1.0,
+      "max_abs_diff": 0.0,
+      "cosine_vs_pos_read_as_CxT": 0.602763
+    },
+    "add_then_permute": {
+      "cosine_vs_cpu": 1.0,
+      "max_abs_diff": 0.0,
+      "cosine_vs_pos_read_as_CxT": 0.602763
+    }
+  }
+}

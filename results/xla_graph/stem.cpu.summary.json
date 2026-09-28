@@ -1,0 +1,40 @@
+{
+  "weights": "real Voxtral weights",
+  "input_shape": [
+    1,
+    128,
+    3000
+  ],
+  "output_shape": [
+    1,
+    1500,
+    1280
+  ],
+  "aten_ops_in_order": [
+    "conv1d.default",
+    "gelu.default",
+    "conv1d.default",
+    "gelu.default",
+    "permute.default",
+    "add.Tensor"
+  ],
+  "hlo_op_counts": {
+    "broadcast": 10,
+    "constant": 7,
+    "multiply": 7,
+    "parameter": 6,
+    "reshape": 6,
+    "add": 5,
+    "transpose": 3,
+    "convolution": 2,
+    "erf": 2,
+    "tuple": 1
+  },
+  "hlo_lines": 54,
+  "xla_cpu_vs_pytorch_cosine": 1.0,
+  "xla_cpu_vs_pytorch_max_abs_diff": 2.574920654296875e-05,
+  "xla_compile_and_run_seconds": 0.32,
+  "xla_device": "CPU",
+  "torch": "2.9.0+cpu",
+  "torch_xla": "2.9.0"
+}

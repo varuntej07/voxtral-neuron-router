@@ -1,0 +1,85 @@
+{
+  "torch": "2.9.0+cpu",
+  "torch_neuronx": "2.9.0.2.15.32035+de43f57c",
+  "compiler_args": "--target=inf2 --model-type=transformer --auto-cast=none",
+  "inline_weights_to_neff": false,
+  "cases": [
+    {
+      "variant": "plain_permute_add",
+      "shape": [
+        1,
+        1280,
+        1500
+      ],
+      "dtype": "float32",
+      "compile_seconds": 3.7,
+      "hlo_has_AwsNeuronGelu": false,
+      "hlo_has_erf": false,
+      "cosine": 0.799661,
+      "max_abs_diff": 7.758016347885132,
+      "got_abs_max": 11.550932884216309,
+      "truth_abs_max": 11.634989976882935,
+      "cosine_vs_pos_reinterpreted": 1.0,
+      "cosine_vs_reshape_not_permute": -0.000672,
+      "cosine_sorted": 0.999999
+    },
+    {
+      "variant": "custom_permute_add",
+      "shape": [
+        1,
+        1280,
+        1500
+      ],
+      "dtype": "float32",
+      "compile_seconds": 3.8,
+      "hlo_has_AwsNeuronGelu": true,
+      "hlo_has_erf": false,
+      "cosine": 0.657862,
+      "max_abs_diff": 7.758016283556083,
+      "got_abs_max": 10.945587158203125,
+      "truth_abs_max": 11.634989976882935,
+      "cosine_vs_pos_reinterpreted": 1.0,
+      "cosine_vs_reshape_not_permute": 0.172596,
+      "cosine_sorted": 0.999999
+    },
+    {
+      "variant": "plain_permute_add",
+      "shape": [
+        1,
+        8,
+        16
+      ],
+      "dtype": "float32",
+      "compile_seconds": 1.4,
+      "hlo_has_AwsNeuronGelu": false,
+      "hlo_has_erf": false,
+      "cosine": 0.859447,
+      "max_abs_diff": 4.443116903305054,
+      "got_abs_max": 7.2120747566223145,
+      "truth_abs_max": 6.595699836499989,
+      "cosine_vs_pos_reinterpreted": 1.0,
+      "cosine_vs_reshape_not_permute": -0.071179,
+      "cosine_sorted": 0.993926
+    },
+    {
+      "variant": "custom_permute_add",
+      "shape": [
+        1,
+        8,
+        16
+      ],
+      "dtype": "float32",
+      "compile_seconds": 1.3,
+      "hlo_has_AwsNeuronGelu": true,
+      "hlo_has_erf": false,
+      "cosine": 0.734411,
+      "max_abs_diff": 4.443116891243777,
+      "got_abs_max": 6.742608070373535,
+      "truth_abs_max": 6.550486426114071,
+      "cosine_vs_pos_reinterpreted": 1.0,
+      "cosine_vs_reshape_not_permute": 0.269416,
+      "cosine_sorted": 0.995903
+    }
+  ],
+  "neuronx_cc": "2.26.6360.0+6f180f47"
+}

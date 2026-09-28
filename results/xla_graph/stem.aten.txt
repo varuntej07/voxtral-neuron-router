@@ -1,0 +1,14 @@
+graph():
+    %p_conv1_weight : [num_users=1] = placeholder[target=p_conv1_weight]
+    %p_conv1_bias : [num_users=1] = placeholder[target=p_conv1_bias]
+    %p_conv2_weight : [num_users=1] = placeholder[target=p_conv2_weight]
+    %p_conv2_bias : [num_users=1] = placeholder[target=p_conv2_bias]
+    %b_positions : [num_users=1] = placeholder[target=b_positions]
+    %mel : [num_users=1] = placeholder[target=mel]
+    %conv1d : [num_users=1] = call_function[target=torch.ops.aten.conv1d.default](args = (%mel, %p_conv1_weight, %p_conv1_bias, [1], [1]), kwargs = {})
+    %gelu : [num_users=1] = call_function[target=torch.ops.aten.gelu.default](args = (%conv1d,), kwargs = {})
+    %conv1d_1 : [num_users=1] = call_function[target=torch.ops.aten.conv1d.default](args = (%gelu, %p_conv2_weight, %p_conv2_bias, [2], [1]), kwargs = {})
+    %gelu_1 : [num_users=1] = call_function[target=torch.ops.aten.gelu.default](args = (%conv1d_1,), kwargs = {})
+    %permute : [num_users=1] = call_function[target=torch.ops.aten.permute.default](args = (%gelu_1, [0, 2, 1]), kwargs = {})
+    %add : [num_users=1] = call_function[target=torch.ops.aten.add.Tensor](args = (%permute, %b_positions), kwargs = {})
+    return (add,)

@@ -1,7 +1,7 @@
 {
   "_comment": "Facts about this project learned on real Trainium and Inferentia hardware, in JSON so an agent can load it without parsing prose. Bar for inclusion: it cost real time or money to find out, and a competent engineer would not have guessed it. Generic Linux, pip or ssh trivia does not belong here. Record the observation in evidence, and if a fix was only worked around rather than made, say so in status.",
   "schema_version": 1,
-  "updated": "2026-09-24",
+  "updated": "2026-09-28",
   "lessons": [
     {
       "id": "ami-has-no-tracing-path",
@@ -247,6 +247,94 @@
       "lesson": "neuronx-cc leaves its scratch directory behind after every trace, and the decoder's is far larger than the artifact it produces. Two stale workdirs held 9.3 GB, which is more than the venv.",
       "evidence": "du -sh showed ~/neuron_artifacts/workdir_decoder at 7.0 G and workdir_encoder at 2.3 G, on a volume that was at 96 percent with 4.1 GB free. Deleting both took it to 87 percent with 14 GB free. The decoder workdir survived from a compile that never even produced a usable artifact.",
       "action": "Delete workdir_* between runs. They are regenerable scratch, unlike the .pt artifacts next to them. Together with the unmounted swapfile this is why the volume looked full for reasons that had nothing to do with the model."
+    },
+    {
+      "id": "a-frozen-encoder-is-a-cache-not-a-graph",
+      "area": "trn1-training",
+      "verified_on": "2026-09-24",
+      "lesson": "The open Neuron encoder bug is not only an inference problem. train_lora.py ran the frozen audio tower on the NeuronCore inside every training step, so the same frontend that scores cosine 0.0975 against the CPU reference at zero transformer depth would have been feeding every gradient. The loss would still have fallen and nothing in the run would have said otherwise. Because the tower and the projector are frozen, their output is a function of the clip alone, so it belongs in a file rather than in the graph.",
+      "evidence": "Voxtral hardcodes encoder dropout, layerdrop and activation_dropout to 0.0 in configuration_voxtral.py and the forward applies F.dropout(p=0.0), a no-op, so a cached embedding is bit-identical to the in-loop one at the same dtype, model.train() included. Caching is exact, not an approximation, which is what makes it safe to do silently.",
+      "why_it_matters": "It is the general shape of the thing: a component that is frozen is data, and data that sits inside a graph inherits every bug that graph has. The correctness argument arrived at the same answer as the speed argument, which is the only reason it was cheap.",
+      "status": "Implemented in scripts/precompute_audio_embeds.py and train_lora.py --audio-embeds. Not yet run on trn1, so no step time is claimed."
+    },
+    {
+      "id": "the-projector-output-is-bigger-than-the-mel",
+      "area": "trn1-training",
+      "verified_on": "2026-09-24",
+      "lesson": "Caching the encoder output to skip the mel looks like it should save disk. It does the opposite. One row of embeddings is 375 x 3072 at 2.20 MiB in bf16, against 1.46 MiB for a 128 x 3000 fp32 mel: the projector trades four times fewer time positions for twenty-four times wider channels, so the cache is 1.5x the array it replaces. The full train split is 10.5 GiB of embeddings against 7.0 GiB of mels.",
+      "evidence": "audio_config.intermediate_size is 5120, which is 4 x d_model 1280: the four-frames-per-token packing is a reshape, and the projector then widens 5120 to the decoder's 3072. 4903 rows x 375 x 3072 x 2 bytes = 10.5 GiB.",
+      "action": "Size the subset and the upload from the embeddings, not the clips. On a root volume that has already hit 96 percent twice this is what decides how many rows a session can hold. Store bf16 as its uint16 bit pattern, since numpy has no bfloat16 and fp32 would double it again for sixteen bits the bf16 training graph discards on arrival.",
+      "why_it_matters": "Also the reason the precompute does not belong on the trn1: encoder plus projector is about 2.3 TFLOP a row, which is under a second on a T4 and tens of seconds on 8 vCPU, so on a fixed clock the precompute becomes the budget rather than the training."
+    },
+    {
+      "id": "no-shuffle-does-not-mean-same-rows-under-torchrun",
+      "area": "tooling",
+      "verified_on": "2026-09-24",
+      "lesson": "train_lora.py documented a CPU-versus-Neuron parity procedure that could not work. --no-shuffle under torchrun still routes through DistributedSampler, which shards rather than orders: rank 0 gets rows 0, 2, 4, 6, 8 while the single process CPU leg gets 0, 1, 2, 3, 4. The two legs train on different examples, so their loss sequences were never comparable and any disagreement would have been read as a hardware parity failure.",
+      "action": "Run both parity legs as a single process. A bare python invocation is valid and leaves the second NeuronCore idle, which is the right trade for a parity run. The docstring now says so.",
+      "why_it_matters": "Found by reading, before the run. A parity procedure that compares two different things does not fail loudly: it produces a number, and the number sends you looking at the hardware."
+    },
+    {
+      "id": "base-voxtral-routes-but-fences-its-json",
+      "area": "voxtral",
+      "verified_on": "2026-09-28",
+      "host": "Windows laptop CPU, torch 2.10.0+cpu, transformers 4.55.2, bf16, names-only catalog prompt",
+      "lesson": "Base Voxtral Mini 3B, with no fine-tuning, chose the right tool for a real row but wrapped the answer in a markdown json code fence and invented its own argument names. The strict parser in eval_routing.py scores that as unparseable, so a base-model accuracy from that script would report a formatting failure as a routing failure.",
+      "evidence": "scripts/speak_and_route.py --wav data/audio/f2b0c5b1991f.wav ('Remind me to call mom in 30 minutes', Piper TTS, 2.22 s). Reply: a ```json fenced object with tool set_reminder and arguments {reminder: 'Call mom in 30 minutes', time: '30 minutes'}; gold arguments are message, when, tier, tone. 47 new tokens. Prompt was 601 positions.",
+      "consequence": "With fine-tuning dropped, the prompt has to carry the call format. The names-only catalog gives the model no argument names, so it guesses them.",
+      "action": "Score base Voxtral two ways: strict, and with the fence stripped (speak_and_route.lenient_parse), so tool choice and output format are measured separately. Try --catalog schemas, or Voxtral's native function calling, before judging the base model.",
+      "status": "One TTS clip, not a measured accuracy. No real speech run yet."
+    },
+    {
+      "id": "the-conv-stem-hlo-is-correct-so-the-bug-is-in-neuronx-cc",
+      "area": "neuron-parity",
+      "verified_on": "2026-09-28",
+      "host": "WSL Ubuntu on the dev laptop, torch 2.9.0+cpu, torch_xla 2.9.0, PJRT_DEVICE=CPU, fp32",
+      "lesson": "The Voxtral conv stem lowered to XLA HLO and executed on XLA's own CPU backend matches eager PyTorch at cosine 1.0 with real checkpoint weights. So the step from PyTorch to HLO, which torch_neuronx.trace shares with plain torch_xla, is not where the encoder goes wrong. The 0.0975 at depth 0 on inf2 comes from below HLO: neuronx-cc or the NeuronCore runtime.",
+      "evidence": "scripts/show_xla_graph.py --weights ~/models/voxtral-mini-3b, results/xla_graph/stem.cpu.summary.json: cosine 1.0, max abs diff 2.57e-05 on [1,1500,1280]. HLO is 54 lines: each Conv1d becomes a 2D convolution on a [1,C,1,T] reshape (dim_labels bf01_oi01->bf01, conv2 with stride=1x2), gelu becomes multiply plus erf, the permute is one transpose.",
+      "why_it_matters": "It halves the search space without an inf2 hour, and it means the fix is either a different HLO shape that the Neuron compiler handles (conv written as matmuls) or a compiler flag, not a change to the PyTorch model.",
+      "caveat": "Same torch minor as venv-trace (2.9) but vanilla torch_xla, not torch-neuronx's build. Input was a random mel of the real shape, not the npz mel.",
+      "status": "Resolved 2026-09-28. The conclusion was half right. On inf2, show_xla_graph.py with PJRT_DEVICE=NEURON gave cosine 1.0, max abs diff 2.67e-05 (results/xla_graph/stem.neuron.summary.json), so neuronx-cc lowers every stem op correctly through torch_xla. The failure needs torch_neuronx.trace and a weight added right after a permute; see weight-added-after-permute-is-read-transposed."
+    },
+    {
+      "id": "weight-added-after-permute-is-read-transposed",
+      "area": "neuron-parity",
+      "verified_on": "2026-09-28",
+      "host": "inf2.xlarge, venv-trace, torch 2.9.0, torch-neuronx 2.9, neuronx-cc 2.26.6360.0+6f180f47",
+      "lesson": "torch_neuronx.trace computes x.permute(0, 2, 1) + w wrong when w is a module weight or buffer. The output equals x.permute(0, 2, 1) + w.reshape(C, T).T exactly: the [T, C] weight is read as if its memory were [C, T]. The same add with w passed as a runtime input is exact, and so is adding w (stored as [C, T]) before the permute. This, not the convs, was the whole Voxtral encoder parity bug.",
+      "evidence": "scripts/repro_permute_add.py, results/repro_permute_add.log and repro_permute_add_{8x16,1280x1500}.json. buffer: cosine vs CPU 0.602763 at 1x8x16 and 0.500660 at 1x1280x1500, and cosine 1.000000 against the 'weight read as [C,T]' prediction at both shapes. input and add_then_permute: cosine 1.000000, max_abs_diff 0. results/gelu_probe.plain.json shows it with no GELU in the graph; gelu_probe.nomodeltype.json shows dropping --model-type=transformer does not change it; gelu_probe.noinline.json shows inline_weights_to_neff=False does not change it either.",
+      "why_it_matters": "The compiler reports PASS and the output has exactly the right value distribution (sorted cosine 0.99999), so nothing but a numeric parity check against CPU catches it. Any Whisper-family encoder does gelu(conv(x)).permute(0, 2, 1) + embed_positions.weight.",
+      "action": "scripts/neuron_patches.patch_encoder_positions: keep the positions as a pre-transposed [1, C, T] buffer and add before the permute. Bit-identical to the HF forward on CPU (torch.equal True at depth 2). neuron_forward_smoke.py applies it by default; --no-position-fix reproduces the bug.",
+      "status": "Worked around in the model, not fixed in the compiler. Unreported upstream as of 2026-09-28: no matching issue in aws-neuron/aws-neuron-sdk. Whether the fault is in neuronx-cc's layout assignment or in how torch_neuronx binds the weight to the layout the compiler chose is not yet separated.",
+      "screenshot": "results/screenshots/05_minimal_repro_permute_add.png"
+    },
+    {
+      "id": "import-torch-neuronx-replaces-gelu",
+      "area": "neuron-parity",
+      "verified_on": "2026-09-28",
+      "host": "inf2.xlarge, venv-trace, torch 2.9.0, torch-neuronx 2.9, neuronx-cc 2.26.6360.0+6f180f47",
+      "lesson": "import torch_neuronx replaces torch.nn.functional.gelu. Code that looks gelu up at call time (HF modeling files do) then lowers to an HLO call into GeluForwardImpl -> HloGeluForwardImpl -> custom-call AwsNeuronGelu. A reference to gelu taken before the import lowers to plain multiply + erf. The custom call itself is numerically fine, but it changes the graph the compiler sees, and in the Voxtral encoder that decided whether the permute-then-add bug fired: the stock HF forward failed at 0.09748 while a line-by-line hand copy using the early-bound gelu passed at 0.99999.",
+      "evidence": "The HLO of conv_stem_probe graphs I (HF forward, fails) and J3 (hand copy, passes), kept with compiler_workdir and decoded with torch_neuronx.pyhlo.hlo_pb2, differ only in the two GELUs. results/gelu_probe.first.json: the AwsNeuronGelu graph alone scores cosine 0.999999 bf16 and 1.0 fp32 at [1,1280,3000] and [1,1280,1500]. No env var disables it; NEURON_FUSE_SOFTMAX and NEURON_CUSTOM_SILU exist for other ops but nothing for GELU.",
+      "why_it_matters": "A hand-written reimplementation of a HF module is not the same Neuron graph as the HF module, even when the Python is identical, if the module was defined before import torch_neuronx. Bisecting a HF model by rewriting its forward can make the bug vanish for the wrong reason, which is exactly what made E pass and F fail here.",
+      "action": "When bisecting, trace the real HF module and change one thing at a time; check the dumped HLO, not the Python source, to see what actually differs."
+    },
+    {
+      "id": "trace-only-moves-registered-weights",
+      "area": "neuron-tooling",
+      "verified_on": "2026-09-28",
+      "host": "inf2.xlarge, venv-trace, torch 2.9.0, torch-neuronx 2.9, neuronx-cc 2.26.6360.0+6f180f47",
+      "lesson": "torch_neuronx.trace moves only a module's registered parameters and buffers to the XLA device. A weight reached through a Python closure stays on CPU and every trace fails in about 0.1 s with 'Expected XLA tensor. Got: CPUBFloat16Type' before neuronx-cc is ever called.",
+      "evidence": "First conv_stem_probe.py run: all 8 graphs COMPILE FAILED in 0.0 to 0.1 s with that error. Making each probe graph own conv1, conv2, layer_norm and the positions as submodules or a buffer fixed all 8.",
+      "action": "Build probe graphs as nn.Modules that register what they use. A compile failure faster than a second is a Python-side error; read the saved exception before blaming the compiler."
+    },
+    {
+      "id": "diff-the-hlo-that-trace-hands-the-compiler",
+      "area": "neuron-tooling",
+      "verified_on": "2026-09-28",
+      "host": "inf2.xlarge, venv-trace, torch 2.9.0, torch-neuronx 2.9, neuronx-cc 2.26.6360.0+6f180f47",
+      "lesson": "The fastest way to explain why two traced graphs with the same math disagree on Neuron is to diff the HLO they hand to neuronx-cc. torch_neuronx.trace(..., compiler_workdir=DIR) keeps DIR/model/graph.hlo (a serialized HloModuleProto), DIR/command.txt (the exact neuronx-cc command) and the NEFF; torch_neuronx.pyhlo.hlo_pb2.HloModuleProto parses it.",
+      "evidence": "That diff found the GELU difference between graphs I and J3 in one step after six rounds of guessing at Python-level differences.",
+      "action": "Pass compiler_workdir whenever a parity result is surprising, and save the Neuron output next to it so hypotheses can be tested on the host without recompiling. Fitting the saved 1x8x16 output against candidate wrong computations is what pinned the bug to 'weight read as [C,T]' at max diff 9e-07."
     }
   ]
 }

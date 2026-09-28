@@ -1,0 +1,44 @@
+{
+  "torch": "2.9.0+cpu",
+  "torch_neuronx": "2.9.0.2.15.32035+de43f57c",
+  "compiler_args": "--target=inf2 --model-type=transformer --auto-cast=none",
+  "cases": [
+    {
+      "variant": "custom",
+      "shape": [
+        1,
+        1280,
+        3000
+      ],
+      "dtype": "bfloat16",
+      "compile_seconds": 1.8,
+      "hlo_has_AwsNeuronGelu": true,
+      "hlo_has_erf": false,
+      "cosine": 0.999999,
+      "max_abs_diff": 0.007768713094328472,
+      "got_abs_max": 9.625,
+      "truth_abs_max": 9.625,
+      "cosine_vs_transposed_input": 0.263876,
+      "cosine_sorted": 0.999999
+    },
+    {
+      "variant": "erf",
+      "shape": [
+        1,
+        1280,
+        3000
+      ],
+      "dtype": "bfloat16",
+      "compile_seconds": 1.6,
+      "hlo_has_AwsNeuronGelu": false,
+      "hlo_has_erf": true,
+      "cosine": 0.999999,
+      "max_abs_diff": 0.007768713094328472,
+      "got_abs_max": 9.625,
+      "truth_abs_max": 9.625,
+      "cosine_vs_transposed_input": 0.263876,
+      "cosine_sorted": 0.999999
+    }
+  ],
+  "neuronx_cc": "2.26.6360.0+6f180f47"
+}
