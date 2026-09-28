@@ -61,6 +61,7 @@ def main():
     ap.add_argument("--t", type=int, default=16)
     ap.add_argument("--compiler-args", default="--target=inf2 --auto-cast=none")
     ap.add_argument("--out", default="")
+    ap.add_argument("--workdir", default="", help="keep each case's HLO, compiler command and NEFF here")
     args = ap.parse_args()
 
     torch.manual_seed(0)
@@ -76,7 +77,8 @@ def main():
     }
     results = {"shape": [1, args.c, args.t], "compiler_args": args.compiler_args, "cases": {}}
     for name, (module, inputs) in cases.items():
-        traced = torch_neuronx.trace(module.eval(), inputs, compiler_args=args.compiler_args.split())
+        extra = {"compiler_workdir": f"{args.workdir}/{name}"} if args.workdir else {}
+        traced = torch_neuronx.trace(module.eval(), inputs, compiler_args=args.compiler_args.split(), **extra)
         got = traced(*inputs).numpy()
         r = {
             "cosine_vs_cpu": round(cosine(got, want), 6),

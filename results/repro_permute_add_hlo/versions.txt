@@ -1,0 +1,17 @@
+## apt list --installed | grep -i neuron
+aws-neuronx-collectives/unknown,now 2.34.10.0-74eaafac6 amd64 [installed]
+aws-neuronx-dkms/unknown,now 2.30.2.0 all [installed]
+aws-neuronx-oci-hook/unknown,now 2.18.25.0 amd64 [installed]
+aws-neuronx-runtime-lib/unknown,now 2.34.10.0-ac18d186d amd64 [installed]
+aws-neuronx-tools/unknown,now 2.32.28.0-526c2b7f6 amd64 [installed]
+
+## pip list | grep -i -e neuron -e torch -e transformers
+libneuronxla              2.2.17544.0+fb9962bf
+neuronx-cc                2.26.6360.0+6f180f47
+torch                     2.9.0+cpu
+torch-neuronx             2.9.0.2.15.32035+de43f57c
+torch-xla                 2.9.0
+transformers              4.56.2
+
+## uname -r
+6.17.0-1019-aws

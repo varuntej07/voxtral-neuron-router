@@ -4,19 +4,31 @@
     "dtype": "bfloat16",
     "attn_implementation": "eager",
     "compiler_args": "--target=inf2 --model-type=transformer --auto-cast=none",
+    "position_fix": true,
+    "layers": null,
+    "seq_len_override": null,
+    "truncated": false,
+    "baseline": "reference_npz",
+    "compile_only": false,
+    "started_utc": "2026-09-28T21:17:29+00:00",
     "reference_dtype": "bfloat16",
     "reference_prefill_tokens": 601,
     "wav_is_synthetic": true,
     "instance": "inf2.xlarge",
+    "artifact_path": "/home/ubuntu/neuron_artifacts/voxtral_encoder_bfloat16.pt",
+    "compiler_workdir": "/home/ubuntu/neuron_artifacts/workdir_encoder",
+    "phase": "done",
+    "phase_elapsed_seconds": 525.8,
     "input_shape": [
       1,
       128,
       3000
     ],
+    "full_depth": 32,
     "compiled": true,
-    "compile_seconds": 286.6,
+    "compile_seconds": 296.3,
     "artifact": "/home/ubuntu/neuron_artifacts/voxtral_encoder_bfloat16.pt",
-    "artifact_mb": 1077.0,
+    "artifact_mb": 1084.6,
     "parity": [
       {
         "tensor": "encoder_hidden",
@@ -25,11 +37,22 @@
           1500,
           1280
         ],
-        "max_abs_diff": 23.3125,
-        "mean_abs_diff": 0.5862758410268958,
-        "relative_frobenius_error": 1.1095372124290332,
-        "cosine_similarity": 0.37242177,
-        "reference_abs_max": 21.0
+        "max_abs_diff": 8.01171875,
+        "mean_abs_diff": 0.013143139877934785,
+        "relative_frobenius_error": 0.05041413159387986,
+        "cosine_similarity": 0.99872992,
+        "reference_abs_max": 21.0,
+        "neuron_abs_max": 20.875,
+        "cosine_by_position": {
+          "0": 0.999556,
+          "1": 0.999712,
+          "2": 0.999629,
+          "375": 0.999971,
+          "750": 0.999748,
+          "1499": 0.999889
+        },
+        "cosine_by_position_mean": 0.998487,
+        "cosine_by_position_min": 0.390958
       },
       {
         "tensor": "audio_embeds",
@@ -37,17 +60,18 @@
           375,
           3072
         ],
-        "max_abs_diff": 2.7890625,
-        "mean_abs_diff": 0.18570462306062513,
-        "relative_frobenius_error": 1.2656227861792575,
-        "cosine_similarity": 0.28256378,
-        "reference_abs_max": 1.9453125
+        "max_abs_diff": 0.2314453125,
+        "mean_abs_diff": 0.0037544576801883524,
+        "relative_frobenius_error": 0.04312103954679468,
+        "cosine_similarity": 0.99906993,
+        "reference_abs_max": 1.9453125,
+        "neuron_abs_max": 1.9453125
       }
     ],
     "graph_latency_ms": {
-      "p50": 82.05,
-      "p95": 82.13,
-      "min": 81.95,
+      "p50": 82.0,
+      "p95": 82.54,
+      "min": 81.36,
       "iters": 20,
       "note": "single graph, one NeuronCore, batch 1, host to device copy included"
     }
